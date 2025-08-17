@@ -1,0 +1,11 @@
+# HTTP requests to APIs (Finnhub, OpenAI, news)
+requests>=2.31.0
+
+# Send emails (SMTP is built-in, but MIME handling is in stdlib)
+# no external dependency needed for email
+
+# CSV + datetime + os + html.escape are in stdlib
+# so no extra packages required
+
+# Optional: if you later want dotenv for local testing
+python-dotenv>=1.0.0
