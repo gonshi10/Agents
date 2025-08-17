@@ -120,15 +120,20 @@ class EarningsAgent:
             data = response.json()
             news = data or []
             
-            # Filter for earnings-related news
+            # Enhanced filtering for earnings-related news and guidance
             relevant_news = []
             for item in news:
                 headline = item.get('headline', '').lower()
-                if any(keyword in headline for keyword in ['earnings', 'quarterly', 'results', 'guidance']):
+                # Look for guidance, outlook, forecasts, and strategic announcements
+                if any(keyword in headline for keyword in [
+                    'earnings', 'quarterly', 'results', 'guidance', 'outlook', 'forecast', 
+                    'investor', 'conference', 'call', 'press release', 'strategic', 'initiative',
+                    'expansion', 'acquisition', 'partnership', 'restructuring', 'cost cutting'
+                ]):
                     relevant_news.append(item)
             
             print(f"✓ Found {len(relevant_news)} relevant news items for {ticker}")
-            return relevant_news[:3]  # Limit to top 3 to reduce tokens
+            return relevant_news[:5]  # Increased to 5 to capture more guidance context
             
         except Exception as e:
             print(f"✗ Failed to get news for {ticker}: {e}")
@@ -156,29 +161,49 @@ class EarningsAgent:
         self.last_openai_call = now
     
     def optimize_context_for_tokens(self, tickers_data):
-        """Optimize context to stay within token limits"""
-        optimized_context = "Analyze earnings results and provide 2-3 key insights per company:\n\n"
+        """Optimize context to stay within token limits with enhanced guidance analysis"""
+        def format_number(value):
+            if value is None or value == 'N/A':
+                return 'N/A'
+            try:
+                return f"{float(value):.2f}"
+            except (ValueError, TypeError):
+                return str(value)
+        
+        optimized_context = """Analyze earnings results and provide sophisticated, forward-looking insights for each company. Focus on:
+
+1. GUIDANCE ANALYSIS: Extract and analyze forward-looking statements, outlook, and strategic initiatives
+2. STRATEGIC IMPLICATIONS: What the numbers mean for future growth, market position, and competitive advantage
+3. RISK FACTORS: Identify potential challenges and how management is addressing them
+4. INVESTMENT THESIS: Why investors should care beyond the obvious beats/misses
+
+Avoid stating the obvious (e.g., "EPS increased"). Instead, focus on strategic insights and guidance implications.
+
+Format: TICKER: [3-4 sophisticated insights with guidance analysis]
+
+"""
         
         for ticker, data in tickers_data.items():
             earnings = data['earnings']
             news = data['news']
             
-            # Truncate news headlines to save tokens
-            news_summary = []
-            for item in news[:2]:  # Only first 2 news items
-                headline = item.get('headline', '')[:40]  # Limit headline length
-                news_summary.append(headline)
+            # Extract guidance insights
+            guidance_insights = self.extract_guidance_insights(news)
             
-            # Create concise context
-            context_line = f"{ticker}: EPS {earnings.get('epsEstimate', 'N/A')}→{earnings.get('epsActual', 'N/A')}, Rev {earnings.get('revenueEstimate', 'N/A')}→{earnings.get('revenueActual', 'N/A')}, News: {'; '.join(news_summary)}\n"
-            
+            # Create comprehensive context with guidance focus
+            context_line = f"""{ticker}: 
+EPS: {format_number(earnings.get('epsEstimate'))}→{format_number(earnings.get('epsActual'))} 
+Revenue: {format_number(earnings.get('revenueEstimate'))}→{format_number(earnings.get('revenueActual'))}
+Period: {earnings.get('period', 'Unknown')}
+Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insights else 'Limited guidance available'}
+
+"""
             optimized_context += context_line
         
-        optimized_context += "\nFormat: TICKER: [2-3 bullet points]"
         return optimized_context
     
     def generate_ai_insights_single(self, ticker, earnings_data, news_data):
-        """Generate AI insights for a single ticker using OpenAI SDK"""
+        """Generate AI insights for a single ticker using OpenAI SDK with enhanced guidance analysis"""
         if not self.openai_client:
             return "AI insights disabled - set OPENAI_API_KEY to enable"
         
@@ -192,26 +217,42 @@ class EarningsAgent:
             # Wait for rate limiting
             self.wait_for_openai_rate_limit()
             
-            # Build optimized context for single ticker
-            context = f"""
-Analyze earnings results for {ticker}:
+            # Format numbers for better readability
+            def format_number(value):
+                if value is None or value == 'N/A':
+                    return 'N/A'
+                try:
+                    return f"{float(value):.2f}"
+                except (ValueError, TypeError):
+                    return str(value)
+            
+            # Enhanced context with guidance focus
+            context = f"""Analyze {ticker} earnings results with sophisticated insights:
 
-Period: {earnings_data.get('period', 'Unknown')}
-EPS: Est {earnings_data.get('epsEstimate', 'N/A')} vs Actual {earnings_data.get('epsActual', 'N/A')}
-Revenue: Est {earnings_data.get('revenueEstimate', 'N/A')} vs Actual {earnings_data.get('revenueActual', 'N/A')}
+FINANCIAL RESULTS:
+- Period: {earnings_data.get('period', 'Unknown')}
+- EPS: Est {format_number(earnings_data.get('epsEstimate'))} vs Actual {format_number(earnings_data.get('epsActual'))}
+- Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {format_number(earnings_data.get('revenueActual'))}
 
-News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
+GUIDANCE & STRATEGIC CONTEXT:
+{chr(10).join([f"- {item.get('headline', 'N/A')}" for item in news_data[:3]])}
 
-Provide 2-3 key insights in bullet points.
+REQUIRED INSIGHTS (3-4 bullet points):
+1. GUIDANCE ANALYSIS: Extract forward-looking statements and strategic initiatives
+2. STRATEGIC IMPLICATIONS: What the results mean for future growth and market position
+3. RISK ASSESSMENT: Identify challenges and management's response
+4. INVESTMENT THESIS: Why this matters beyond obvious beats/misses
+
+AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights and guidance implications.
 """
             
-            print(f"🤖 Generating AI insights for {ticker}...")
+            print(f"🤖 Generating enhanced AI insights for {ticker}...")
             
-            # Use OpenAI SDK instead of direct HTTP requests
+            # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a financial analyst. Provide concise, actionable insights."},
+                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request
@@ -222,7 +263,7 @@ Provide 2-3 key insights in bullet points.
             # Cache the result
             self.insights_cache[cache_key] = content
             
-            print(f"✓ Generated AI insights for {ticker}")
+            print(f"✓ Generated enhanced AI insights for {ticker}")
             return content
             
         except Exception as e:
@@ -247,7 +288,7 @@ Provide 2-3 key insights in bullet points.
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {"role": "system", "content": "You are a financial analyst. Provide concise, actionable insights for each company."},
+                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. For each company, provide 3-4 sophisticated insights that focus on guidance analysis, strategic implications, risk factors, and investment thesis. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request * len(tickers_data)  # Scale tokens with ticker count
@@ -340,12 +381,41 @@ Provide 2-3 key insights in bullet points.
         
         return insights
     
+    def extract_guidance_insights(self, news_data):
+        """Extract guidance and strategic insights from news data"""
+        guidance_insights = []
+        
+        for item in news_data:
+            headline = item.get('headline', '').lower()
+            summary = item.get('summary', '')
+            
+            # Look for guidance-related content
+            if any(keyword in headline for keyword in ['guidance', 'outlook', 'forecast', 'expects', 'targets']):
+                guidance_insights.append(f"GUIDANCE: {item.get('headline', 'N/A')}")
+            elif any(keyword in headline for keyword in ['strategic', 'initiative', 'expansion', 'acquisition']):
+                guidance_insights.append(f"STRATEGIC: {item.get('headline', 'N/A')}")
+            elif any(keyword in headline for keyword in ['restructuring', 'cost cutting', 'efficiency']):
+                guidance_insights.append(f"OPERATIONAL: {item.get('headline', 'N/A')}")
+            elif any(keyword in headline for keyword in ['investor', 'conference', 'call', 'press release']):
+                guidance_insights.append(f"INVESTOR RELATIONS: {item.get('headline', 'N/A')}")
+        
+        return guidance_insights[:3]  # Return top 3 most relevant
+    
     def create_email_content(self, ticker, earnings_data, news_data, ai_insights):
         """Create email content"""
-        eps_est = earnings_data.get('epsEstimate', 'N/A')
-        eps_act = earnings_data.get('epsActual', 'N/A')
-        rev_est = earnings_data.get('revenueEstimate', 'N/A')
-        rev_act = earnings_data.get('revenueActual', 'N/A')
+        # Format numbers as floats with 2 decimal places
+        def format_number(value):
+            if value is None or value == 'N/A':
+                return 'N/A'
+            try:
+                return f"{float(value):.2f}"
+            except (ValueError, TypeError):
+                return str(value)
+        
+        eps_est = format_number(earnings_data.get('epsEstimate'))
+        eps_act = format_number(earnings_data.get('epsActual'))
+        rev_est = format_number(earnings_data.get('revenueEstimate'))
+        rev_act = format_number(earnings_data.get('revenueActual'))
         period = earnings_data.get('period', 'Unknown')
         
         # Calculate beats/misses
