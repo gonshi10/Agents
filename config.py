@@ -6,6 +6,11 @@ Configuration file for Earnings Agent
 import os
 from typing import Optional
 
+LOCAL = True
+if LOCAL:
+    from dotenv import load_dotenv
+    load_dotenv()
+
 class Config:
     """Centralized configuration for the Earnings Agent"""
     
@@ -29,7 +34,6 @@ class Config:
     
     # Runtime Settings
     TEST_MODE: bool = os.getenv("TEST_MODE", "false").lower() == "true"
-    LOCAL_MODE: bool = os.getenv("LOCAL_MODE", "false").lower() == "true"
     
     # API Rate Limiting
     API_DELAY_SECONDS: float = float(os.getenv("API_DELAY_SECONDS", "1.0"))

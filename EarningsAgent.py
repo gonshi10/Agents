@@ -24,14 +24,6 @@ from zoneinfo import ZoneInfo
 import time
 from config import Config
 
-# Load environment variables if in local mode
-if Config.LOCAL_MODE:
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass
-
 # Constants
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
@@ -539,7 +531,7 @@ Use specific numbers and percentages. Be concise and actionable."""
         
         # Determine target date
         if self.config.TEST_MODE:
-            target_date = (now_et - timedelta(days=1)).date()
+            target_date = (now_et - timedelta(days=3)).date()
         else:
             target_date = (now_et - timedelta(days=1)).date()
         
