@@ -1,6 +1,12 @@
 # HTTP requests to APIs (Finnhub, OpenAI, news)
 requests>=2.31.0
 
+# Async HTTP client for improved performance
+aiohttp>=3.8.0
+
+# Async support
+asyncio
+
 # Send emails (SMTP is built-in, but MIME handling is in stdlib)
 # no external dependency needed for email
 

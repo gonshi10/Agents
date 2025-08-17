@@ -1,22 +1,11 @@
 #!/usr/bin/env python3
 """
-Earnings Watchlist Agent — Midnight ET, CSV-only, No DB, WITH PRESS-RELEASE TEXT
-- Runs once per ET midnight (script self-guards to only send at ~00:xx ET)
-- Reads tickers from watchlist.csv (Symbol column)
-- Sends ONE email per ticker that reported during the ET day that just ended
-- Includes EPS/Revenue actual vs estimate, guidance/forecast (from PR/call text when available), headlines,
-  and AI bullet points (5–8) based on full press-release/IR text if accessible.
-
-Env vars (set via GitHub Actions Secrets or local .env):
-FINNHUB_API_KEY=...
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your@gmail.com
-SMTP_PASS=your_app_password
-EMAIL_TO=your@gmail.com
-WATCHLIST_CSV=./watchlist.csv
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
+Earnings Watchlist Agent — Intelligent Stock Earnings Monitor
+- Automatically fetches earnings data for stocks in watchlist.csv
+- Uses AI to generate comprehensive summaries and insights
+- Sends detailed email reports for each earnings announcement
+- Extracts guidance and forward-looking statements
+- Built-in rate limiting and error handling
 """
 
 import csv
@@ -24,407 +13,571 @@ import html
 import os
 import re
 import smtplib
+import asyncio
+import aiohttp
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Optional, Tuple
-import requests
+from typing import List, Optional, Tuple, Dict, Any
+import json
 from zoneinfo import ZoneInfo
 import time
+from config import Config
 
-# ----- DEBUG Vars -----
-LOCAL = False
-if LOCAL:
-    from dotenv import load_dotenv
-    load_dotenv()
-TEST = True
-# ----------------------
+# Load environment variables if in local mode
+if Config.LOCAL_MODE:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
+# Constants
 FINNHUB_BASE = "https://finnhub.io/api/v1"
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 
-# ---------- small HTML helpers ----------
+# HTML processing regex patterns (compiled once for efficiency)
 TAG_RE = re.compile(r"<[^>]+>")
 WHITESPACE_RE = re.compile(r"[ \t\f\v]+")
 NEWLINE_RE = re.compile(r"\n{3,}")
+SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", flags=re.DOTALL | re.IGNORECASE)
+NAV_ASIDE_RE = re.compile(r"<(aside|nav|footer|header)[^>]*>.*?</\1>", flags=re.DOTALL | re.IGNORECASE)
 
-def strip_html(raw: str) -> str:
-    text = TAG_RE.sub("\n", raw)
-    text = WHITESPACE_RE.sub(" ", text)
-    text = NEWLINE_RE.sub("\n\n", text)
-    return text.strip()
-
-def extract_article_maintext(html_text: str) -> str:
-    """
-    Very simple main-text extractor (no external libs).
-    Tries common containers first; falls back to concatenated <p> text.
-    """
-    lowered = html_text.lower()
-
-    # Try to isolate likely article containers
-    blocks = []
-    # Common PR/article wrappers
-    for marker in [
-        r"<article[^>]*>.*?</article>",
-        r"<div[^>]+class=[\"'][^\"']*(?:article|entry|post|content|story|pr|press)[^\"']*[\"'][^>]*>.*?</div>",
-        r"<section[^>]+class=[\"'][^\"']*(?:article|content|story)[^\"']*[\"'][^>]*>.*?</section>",
-    ]:
-        for m in re.finditer(marker, lowered, flags=re.DOTALL):
-            blocks.append(html_text[m.start():m.end()])
-
-    # Fallback: grab many <p> tags as a block
-    if not blocks:
-        p_texts = re.findall(r"<p[^>]*>.*?</p>", html_text, flags=re.DOTALL | re.IGNORECASE)
-        if p_texts:
-            blocks = ["\n".join(p_texts)]
-
-    if not blocks:
-        return ""
-
-    # Choose the largest block by text length
-    best = max(blocks, key=lambda b: len(b))
-    # Strip script/style
-    best = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", best, flags=re.DOTALL | re.IGNORECASE)
-    # Remove nav/aside bits if embedded
-    best = re.sub(r"<(aside|nav|footer|header)[^>]*>.*?</\1>", "", best, flags=re.DOTALL | re.IGNORECASE)
-
-    return strip_html(best)
-
-# ---------- env + CSV ----------
-def env(name: str, default: Optional[str] = None) -> str:
-    v = os.getenv(name, default)
-    if v is None:
-        raise RuntimeError(f"Missing required env var: {name}")
-    return v
-
-def load_tickers(csv_path: str) -> List[str]:
-    tickers = []
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            sym = (row.get("Symbol") or row.get("symbol") or "").strip().upper()
-            if sym:
-                tickers.append(sym)
-    if not tickers:
-        raise RuntimeError("No tickers found in CSV. Ensure it has a 'Symbol' header.")
-    return sorted(set(tickers))
-
-# ---------- finnhub ----------
-def fh_get(path: str, params: dict, key: str) -> dict:
-    p = {"token": key, **params}
-    r = requests.get(f"{FINNHUB_BASE}{path}", params=p, timeout=30, headers={"User-Agent": UA})
-    r.raise_for_status()
-    return r.json()
-
-def get_earnings_for_et_day(ticker: str, finnhub_key: str, et_day_str: str) -> list:
-    data = fh_get("/calendar/earnings", {"from": et_day_str, "to": et_day_str, "symbol": ticker}, finnhub_key)
-    return data.get("earningsCalendar", []) or []
-
-def get_company_news_for_et_day(ticker: str, finnhub_key: str, et_day_str: str) -> list:
-    data = fh_get("/company-news", {"symbol": ticker, "from": et_day_str, "to": et_day_str}, finnhub_key)
-    out = []
-    for n in data or []:
-        headline = (n.get("headline") or "").strip()
-        src = (n.get("source") or "").strip().lower()
-        url = (n.get("url") or "").strip()
-        # prioritize press-release style sources/domains
-        is_prish = any(d in url.lower() for d in [
-            "businesswire.com", "prnewswire.com", "globenewswire.com", "newsfilecorp.com",
-            "seekingalpha.com", "investor", "ir.", "/press-", "/pressrelease", "sec.gov", "8-k"
-        ])
-        if re.search(r"\b(Q[1-4]|quarter|earnings|results|guidance|outlook|forecast)\b", headline, re.I) or is_prish:
-            out.append(n)
-    # newest first
-    out.sort(key=lambda x: x.get("datetime", 0), reverse=True)
-    return out[:10]
-
-# ---------- fetch press text ----------
-def fetch_press_text(url: str) -> str:
-    if not url:
-        return ""
-    try:
-        r = requests.get(url, timeout=30, headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
-        r.raise_for_status()
-        text = extract_article_maintext(r.text)
-        # trim super long content for LLM prompt safety
-        if len(text) > 8000:
-            text = text[:8000] + "\n[...]"
-        return text
-    except Exception:
-        return ""
-
-# ---------- guidance extraction (regex heuristics from PR/summary) ----------
-def extract_guidance_lines_from_text(text: str) -> List[str]:
-    lines: List[str] = []
-    # Common guidance patterns
-    patterns: List[Tuple[str, re.Pattern]] = [
-        ("Revenue", re.compile(
-            r"(?:revenue|sales).{0,40}(?:guidance|outlook|expects|forecast|sees).{0,40}\$?\s*([0-9][0-9,\.]*)\s*(?:to|-|–|—)\s*\$?\s*([0-9][0-9,\.]*)",
-            re.I)),
-        ("Revenue", re.compile(
-            r"(?:revenue|sales).{0,40}(?:guidance|outlook|expects|forecast|sees).{0,40}\$?\s*([0-9][0-9,\.]*)",
-            re.I)),
-        ("EPS", re.compile(
-            r"(?:EPS|earnings per share).{0,40}(?:guidance|outlook|expects|forecast|sees).{0,40}\$?\s*(-?[0-9][0-9\.,]*)(?:\s*(?:to|-|–|—)\s*\$?\s*(-?[0-9][0-9\.,]*))?",
-            re.I)),
-        ("Margin", re.compile(
-            r"(?:margin|GM|operating margin).{0,40}(?:guidance|outlook|expects|forecast|sees).{0,40}([0-9]{1,3}\.?[0-9]?)\s*%",
-            re.I)),
-        ("Growth", re.compile(
-            r"(?:growth|increase|decline).{0,30}(?:guidance|outlook|expects|forecast|sees).{0,30}([0-9]{1,3}\.?[0-9]?)\s*%",
-            re.I)),
-    ]
-    for label, pat in patterns:
-        for m in pat.finditer(text):
-            if m.lastindex == 2 and m.group(2):
-                a, b = m.group(1), m.group(2)
-                lines.append(f"{label} guidance: {a}–{b}")
-            else:
-                lines.append(f"{label} guidance: {m.group(1)}")
-
-    # Period identifiers
-    for m in re.finditer(r"\b(FY\s?20\d{2}|fiscal\s+(?:year|quarter|Q[1-4]))\b", text, re.I):
-        val = m.group(1).strip()
-        if val and all(val not in l for l in lines):
-            lines.append(f"Guidance period mention: {val}")
-
-    # de-dup, cap
-    dedup, seen = [], set()
-    for l in lines:
-        if l not in seen:
-            dedup.append(l)
-            seen.add(l)
-    return dedup[:8]
-
-# ---------- AI summarization ----------
-SUMMARY_SYSTEM_PROMPT = (
-    "You are an equity research assistant. Write a crisp, investor-grade recap (5–8 bullets) of a single ticker's "
-    "quarterly results for today (US Eastern). PRIORITIZE NUMBERS and DELTAS. Each bullet should carry concrete data. "
-    "Cover, in order: "
-    "1) EPS and revenue vs consensus (beat/miss and magnitude), "
-    "2) YoY and/or sequential growth rates for revenue/EPS/GM/OpInc if present, "
-    "3) guidance/forecast (explicit ranges/points) and whether raised/lowered vs prior, "
-    "4) margins (gross/operating) and notable changes, "
-    "5) segment/geography movers (with %/bps where available), "
-    "6) capital returns (buybacks/dividends) and capex, "
-    "7) backlog/bookings and demand commentary if present, "
-    "8) concise implications (drivers/risks) grounded in the facts above. "
-    "Avoid generic phrasing. No headlines, no fluff. Use short bullets."
-)
-
-def _coerce_float(x):
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-def build_facts_for_llm(ticker: str, period, eps_est, eps_act, rev_est, rev_act,
-                        guidance_lines: List[str], news: list, press_texts: List[str]) -> str:
-    lines = [f"Ticker: {ticker}", f"Period: {period}"]
-    if _coerce_float(eps_act) is not None or _coerce_float(eps_est) is not None:
-        lines.append(f"EPS: actual={eps_act} estimate={eps_est}")
-    if _coerce_float(rev_act) is not None or _coerce_float(rev_est) is not None:
-        lines.append(f"Revenue: actual={rev_act} estimate={rev_est}")
-    if guidance_lines:
-        lines.append("Extracted guidance (regex):")
-        for g in guidance_lines:
-            lines.append(f"- {g}")
-    if news:
-        lines.append("Links:")
-        for n in news[:5]:
-            headline = (n.get("headline") or "").strip()
-            src = (n.get("source") or "").strip()
-            url = (n.get("url") or "").strip()
-            lines.append(f"- {headline} [{src}] {url}")
-    # Append short press excerpts
-    if press_texts:
-        lines.append("Press release excerpts (for grounding):")
-        for t in press_texts[:2]:
-            excerpt = t.strip().split("\n")
-            excerpt = " ".join(excerpt[:12])  # ~ first few sentences
-            if len(excerpt) > 1200:
-                excerpt = excerpt[:1200] + " [...]"
-            lines.append(f"- {excerpt}")
-    return "\n".join(lines)
-
-def summarize_with_llm(openai_api_key: str, model: str, facts_text: str) -> str:
-    headers = {"Authorization": f"Bearer {openai_api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-            {"role": "user", "content": facts_text},
-        ],
-        "temperature": 0.25,
-    }
-    r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    data = r.json()
-    return (data["choices"][0]["message"]["content"] or "").strip()
-
-# ---------- email ----------
-def send_email(smtp_host: str, smtp_port: int, smtp_user: str, smtp_pass: str,
-               email_to: str, subject: str, html_body: str) -> None:
-    msg = MIMEMultipart("alternative")
-    msg["From"] = smtp_user
-    msg["To"] = email_to
-    msg["Subject"] = subject
-
-    text_body = re.sub(r"<[^>]+>", "", html_body)
-    msg.attach(MIMEText(text_body, "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-    with smtplib.SMTP(smtp_host, smtp_port) as s:
-        s.starttls()
-        s.login(smtp_user, smtp_pass)
-        s.send_message(msg)
-
-# ---------- misc formatting ----------
-def fmt_num(x) -> str:
-    if x in (None, "", "null"):
-        return "—"
-    try:
-        return f"{float(x):,.2f}"
-    except Exception:
-        return str(x)
-
-# ---------- main ----------
-def main():
-    # Only act during 00:xx in New York
-    now_et = datetime.now(ZoneInfo("America/New_York"))
-    if now_et.hour != 0 and not TEST:
-        print(f"[INFO] Not midnight ET (now_et={now_et}); exiting.")
-        return
-
-    # The ET day that just ended
-    target_et_day = (datetime.today() - timedelta(days=3)).date() if TEST else (now_et - timedelta(days=1)).date()
-    et_day_str = target_et_day.isoformat()
-
-    finnhub_key = env("FINNHUB_API_KEY")
-    tickers = load_tickers(env("WATCHLIST_CSV", "./watchlist.csv"))
-
-    smtp_host = env("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(env("SMTP_PORT", "587"))
-    smtp_user = env("SMTP_USER")
-    smtp_pass = env("SMTP_PASS")
-    email_to = env("EMAIL_TO")
-
-    openai_key = os.getenv("OPENAI_API_KEY")
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-    sent_any = False
-
-    for t in tickers:
+class EarningsProcessor:
+    """Main class for processing earnings data"""
+    
+    def __init__(self):
+        self.config = Config()
+        self.session = None
+        self.earnings_cache = {}
+        
+    async def __aenter__(self):
+        """Async context manager entry"""
+        connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
+        timeout = aiohttp.ClientTimeout(total=30)
+        self.session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            headers={"User-Agent": USER_AGENT}
+        )
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        if self.session:
+            await self.session.close()
+    
+    def validate_config(self) -> List[str]:
+        """Validate configuration and return missing items"""
+        missing = self.config.validate()
+        if missing:
+            print(f"[ERROR] Missing required configuration: {', '.join(missing)}")
+        return missing
+    
+    def load_tickers(self) -> List[str]:
+        """Load ticker symbols from CSV file"""
         try:
-            events = get_earnings_for_et_day(t, finnhub_key, et_day_str)
+            tickers = []
+            with open(self.config.WATCHLIST_CSV, newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    sym = (row.get("Symbol") or row.get("symbol") or "").strip().upper()
+                    if sym:
+                        tickers.append(sym)
+            
+            if not tickers:
+                raise RuntimeError("No tickers found in CSV")
+            
+            tickers = sorted(set(tickers))  # Remove duplicates
+            print(f"[INFO] Loaded {len(tickers)} tickers from {self.config.WATCHLIST_CSV}")
+            return tickers
+            
         except Exception as e:
-            print(f"[WARN] earnings fetch failed for {t}: {e}")
-            continue
+            print(f"[ERROR] Failed to load tickers: {e}")
+            raise
+    
+    async def fetch_earnings_data(self, ticker: str, date_str: str) -> List[Dict[str, Any]]:
+        """Fetch earnings data for a specific ticker and date"""
+        try:
+            params = {
+                "token": self.config.FINNHUB_API_KEY,
+                "from": date_str,
+                "to": date_str,
+                "symbol": ticker
+            }
+            
+            async with self.session.get(f"{FINNHUB_BASE}/calendar/earnings", params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return data.get("earningsCalendar", []) or []
+                
+        except Exception as e:
+            print(f"[WARN] Failed to fetch earnings for {ticker}: {e}")
+            return []
+    
+    async def fetch_company_news(self, ticker: str, date_str: str) -> List[Dict[str, Any]]:
+        """Fetch company news for a specific ticker and date"""
+        try:
+            params = {
+                "token": self.config.FINNHUB_API_KEY,
+                "symbol": ticker,
+                "from": date_str,
+                "to": date_str
+            }
+            
+            async with self.session.get(f"{FINNHUB_BASE}/company-news", params=params) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                # Filter and prioritize relevant news
+                relevant_news = []
+                for news in data or []:
+                    headline = (news.get("headline") or "").strip()
+                    url = (news.get("url") or "").strip()
+                    
+                    # Check if news is earnings-related
+                    is_earnings_related = any(keyword in headline.lower() for keyword in [
+                        "earnings", "quarterly", "results", "guidance", "outlook", "forecast"
+                    ])
+                    
+                    # Check if source is press release
+                    is_press_release = any(domain in url.lower() for domain in [
+                        "businesswire.com", "prnewswire.com", "globenewswire.com",
+                        "newsfilecorp.com", "investor", "ir.", "/press-", "/pressrelease"
+                    ])
+                    
+                    if is_earnings_related or is_press_release:
+                        relevant_news.append(news)
+                
+                # Sort by datetime (newest first)
+                relevant_news.sort(key=lambda x: x.get("datetime", 0), reverse=True)
+                return relevant_news[:10]  # Limit to top 10
+                
+        except Exception as e:
+            print(f"[WARN] Failed to fetch news for {ticker}: {e}")
+            return []
+    
+    async def fetch_press_release_text(self, url: str) -> str:
+        """Fetch and extract text from press release URL"""
+        if not url:
+            return ""
+        
+        try:
+            async with self.session.get(url, headers={"Accept-Language": "en-US,en;q=0.9"}) as response:
+                response.raise_for_status()
+                html_content = await response.text()
+                return self.extract_main_text(html_content)
+                
+        except Exception as e:
+            print(f"[WARN] Failed to fetch press release from {url}: {e}")
+            return ""
+    
+    def extract_main_text(self, html_text: str) -> str:
+        """Extract main text content from HTML"""
+        if not html_text:
+            return ""
+        
+        # Try to find article containers
+        blocks = []
+        
+        # Look for common article wrappers
+        article_patterns = [
+            r"<article[^>]*>.*?</article>",
+            r"<div[^>]+class=[\"'][^\"']*(?:article|entry|post|content|story|pr|press)[^\"']*[\"'][^>]*>.*?</div>",
+            r"<section[^>]+class=[\"'][^\"']*(?:content|story)[^\"']*[\"'][^>]*>.*?</section>",
+        ]
+        
+        for pattern in article_patterns:
+            matches = re.finditer(pattern, html_text, flags=re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                blocks.append(html_text[match.start():match.end()])
+        
+        # Fallback to paragraph tags
+        if not blocks:
+            p_tags = re.findall(r"<p[^>]*>.*?</p>", html_text, flags=re.DOTALL | re.IGNORECASE)
+            if p_tags:
+                blocks = ["\n".join(p_tags)]
+        
+        if not blocks:
+            return ""
+        
+        # Choose the largest text block
+        best_block = max(blocks, key=len)
+        
+        # Clean up the content
+        best_block = SCRIPT_STYLE_RE.sub("", best_block)
+        best_block = NAV_ASIDE_RE.sub("", best_block)
+        
+        # Extract and clean text
+        text = TAG_RE.sub("\n", best_block)
+        text = WHITESPACE_RE.sub(" ", text)
+        text = NEWLINE_RE.sub("\n\n", text)
+        
+        # Limit text length for AI processing
+        if len(text) > self.config.MAX_PRESS_TEXT_LENGTH:
+            text = text[:self.config.MAX_PRESS_TEXT_LENGTH] + "\n[...]"
+        
+        return text.strip()
+    
+    def extract_guidance(self, text: str) -> List[str]:
+        """Extract guidance and forward-looking statements from text"""
+        guidance_lines = []
+        
+        # Common guidance patterns
+        patterns = [
+            (r"revenue.*?guidance.*?\$?\s*([0-9][0-9,\.]*)\s*(?:to|-|–|—)\s*\$?\s*([0-9][0-9,\.]*)", "Revenue guidance: {}-{}"),
+            (r"revenue.*?guidance.*?\$?\s*([0-9][0-9,\.]*)", "Revenue guidance: {}"),
+            (r"EPS.*?guidance.*?\$?\s*(-?[0-9][0-9\.,]*)(?:\s*(?:to|-|–|—)\s*\$?\s*(-?[0-9][0-9\.,]*))?", "EPS guidance: {}"),
+            (r"margin.*?guidance.*?([0-9]{1,3}\.?[0-9]?)\s*%", "Margin guidance: {}%"),
+            (r"growth.*?guidance.*?([0-9]{1,3}\.?[0-9]?)\s*%", "Growth guidance: {}%"),
+        ]
+        
+        for pattern, template in patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if match.groups():
+                    if len(match.groups()) == 2 and match.group(2):
+                        guidance_lines.append(template.format(match.group(1), match.group(2)))
+                    else:
+                        guidance_lines.append(template.format(match.group(1)))
+        
+        # Add period mentions
+        period_matches = re.finditer(r"\b(FY\s?20\d{2}|fiscal\s+(?:year|quarter|Q[1-4]))\b", text, re.IGNORECASE)
+        for match in period_matches:
+            period = match.group(1).strip()
+            if period and not any(period in line for line in guidance_lines):
+                guidance_lines.append(f"Guidance period: {period}")
+        
+        # Remove duplicates and limit
+        seen = set()
+        unique_guidance = []
+        for line in guidance_lines:
+            if line not in seen:
+                unique_guidance.append(line)
+                seen.add(line)
+        
+        return unique_guidance[:self.config.MAX_GUIDANCE_LINES]
+    
+    async def generate_ai_summary(self, ticker: str, earnings_data: Dict[str, Any], 
+                                 guidance_lines: List[str], news: List[Dict[str, Any]], 
+                                 press_texts: List[str]) -> str:
+        """Generate AI summary using OpenAI"""
+        if not self.config.OPENAI_API_KEY:
+            return "<p style='color:#777'>(AI summary disabled — set OPENAI_API_KEY to enable.)</p>"
+        
+        try:
+            # Build context for AI
+            context = self.build_ai_context(ticker, earnings_data, guidance_lines, news, press_texts)
+            
+            # Prepare OpenAI request
+            headers = {
+                "Authorization": f"Bearer {self.config.OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": self.config.OPENAI_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": """You are an expert equity research analyst. Create a concise, data-driven summary (5-8 bullet points) of quarterly earnings results. Focus on:
+1) EPS and revenue performance vs estimates (beat/miss magnitude)
+2) Year-over-year and sequential growth rates
+3) Forward guidance and outlook changes
+4) Margin trends and operational metrics
+5) Key business drivers and risks
+6) Capital allocation (buybacks, dividends, capex)
+7) Segment performance highlights
+8) Investment implications
 
-        for ev in events:
-            period = ev.get("period") or ev.get("quarter") or et_day_str
-            date_str = ev.get("date") or ev.get("reportDate") or et_day_str
-
-            eps_est = ev.get("epsEstimate") or ev.get("estimate")
-            eps_act = ev.get("epsActual") or ev.get("actual")
-            rev_est = ev.get("revenueEstimate")
-            rev_act = ev.get("revenueActual")
-
-            # Pull same-day news, try to fetch full PR text for up to 2 links
-            try:
-                news = get_company_news_for_et_day(t, finnhub_key, et_day_str)
-            except Exception as e:
-                print(f"[WARN] news fetch failed for {t}: {e}")
-                news = []
-
-            press_texts: List[str] = []
-            for n in news:
-                url = (n.get("url") or "").strip()
-                if not url:
-                    continue
-                # prefer PR-ish domains first, cap at 2 fetches
-                if any(d in url.lower() for d in ["businesswire.com", "prnewswire.com", "globenewswire.com", "newsfilecorp.com", "investor", "ir."]):
-                    press_texts.append(fetch_press_text(url))
-                if len([p for p in press_texts if p]) >= 2:
-                    break
-            # if no PR domains found, try first non-empty
-            if not any(press_texts):
-                for n in news[:2]:
-                    url = (n.get("url") or "").strip()
-                    if url:
-                        txt = fetch_press_text(url)
-                        if txt:
-                            press_texts.append(txt)
-                    if len([p for p in press_texts if p]) >= 2:
-                        break
-
-            # Regex guidance from combined text (PR text + headlines/summaries)
-            combined_text = "\n".join([(n.get("headline") or "") + " " + (n.get("summary") or "") for n in news])
-            combined_text += "\n" + "\n".join(press_texts)
-            guidance_lines = extract_guidance_lines_from_text(combined_text)
-
-            # LLM summary
-            if openai_key:
-                try:
-                    facts_text = build_facts_for_llm(t, period, eps_est, eps_act, rev_est, rev_act, guidance_lines, news, press_texts)
-                    bullets_md = summarize_with_llm(openai_key, openai_model, facts_text)
-                    bullet_lines = [ln.strip("-• ").strip() for ln in bullets_md.splitlines() if ln.strip()]
-                    summary_html = "<ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in bullet_lines) + "</ul>"
-                except Exception as e:
-                    summary_html = f"<p style='color:#777'>(AI summary unavailable: {html.escape(str(e))})</p>"
-            else:
-                summary_html = "<p style='color:#777'>(AI summary disabled — set OPENAI_API_KEY to enable.)</p>"
-
-            # Headlines list
+Use specific numbers and percentages. Be concise and actionable."""
+                    },
+                    {
+                        "role": "user",
+                        "content": context
+                    }
+                ],
+                "temperature": self.config.OPENAI_TEMPERATURE,
+                "max_tokens": 500
+            }
+            
+            # Make API call
+            async with self.session.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=payload
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                content = data["choices"][0]["message"]["content"]
+                if not content:
+                    raise ValueError("Empty response from OpenAI")
+                
+                # Convert markdown bullets to HTML
+                bullet_lines = [line.strip("-• ").strip() for line in content.splitlines() if line.strip()]
+                summary_html = "<ul>" + "".join(f"<li>{html.escape(line)}</li>" for line in bullet_lines) + "</ul>"
+                
+                print(f"[INFO] Generated AI summary for {ticker} with {len(bullet_lines)} bullet points")
+                return summary_html
+                
+        except Exception as e:
+            print(f"[WARN] AI summary failed for {ticker}: {e}")
+            return f"<p style='color:#777'>(AI summary unavailable: {html.escape(str(e))})</p>"
+    
+    def build_ai_context(self, ticker: str, earnings_data: Dict[str, Any], 
+                         guidance_lines: List[str], news: List[Dict[str, Any]], 
+                         press_texts: List[str]) -> str:
+        """Build context string for AI analysis"""
+        lines = [
+            f"Ticker: {ticker}",
+            f"Period: {earnings_data.get('period', 'Unknown')}",
+            f"Report Date: {earnings_data.get('date', 'Unknown')}"
+        ]
+        
+        # Add financial metrics
+        eps_est = earnings_data.get('epsEstimate')
+        eps_act = earnings_data.get('epsActual')
+        rev_est = earnings_data.get('revenueEstimate')
+        rev_act = earnings_data.get('revenueActual')
+        
+        if eps_est is not None or eps_act is not None:
+            lines.append(f"EPS: estimate={eps_est}, actual={eps_act}")
+        if rev_est is not None or rev_act is not None:
+            lines.append(f"Revenue: estimate={rev_est}, actual={rev_act}")
+        
+        # Add guidance
+        if guidance_lines:
+            lines.append("Guidance:")
+            lines.extend(f"- {line}" for line in guidance_lines)
+        
+        # Add news headlines
+        if news:
+            lines.append("News Headlines:")
+            for item in news[:5]:
+                headline = item.get('headline', '').strip()
+                source = item.get('source', '').strip()
+                lines.append(f"- {headline} [{source}]")
+        
+        # Add press release excerpts
+        if press_texts:
+            lines.append("Press Release Excerpts:")
+            for text in press_texts[:2]:
+                excerpt = " ".join(text.split()[:100])  # First 100 words
+                if len(excerpt) > 500:
+                    excerpt = excerpt[:500] + " [...]"
+                lines.append(f"- {excerpt}")
+        
+        return "\n".join(lines)
+    
+    def format_number(self, value) -> str:
+        """Format number values for display"""
+        if value in (None, "", "null"):
+            return "—"
+        try:
+            return f"{float(value):,.2f}"
+        except (ValueError, TypeError):
+            return str(value)
+    
+    def create_email_html(self, ticker: str, earnings_data: Dict[str, Any], 
+                          guidance_lines: List[str], news: List[Dict[str, Any]], 
+                          ai_summary: str, date_str: str) -> str:
+        """Create HTML email content"""
+        period = earnings_data.get('period', 'Unknown')
+        eps_est = earnings_data.get('epsEstimate')
+        eps_act = earnings_data.get('epsActual')
+        rev_est = earnings_data.get('revenueEstimate')
+        rev_act = earnings_data.get('revenueActual')
+        
+        # Create news items HTML
+        news_items_html = ""
+        if news:
             news_items_html = "".join(
-                f"<li><a href='{html.escape(n.get('url') or '')}'>{html.escape(n.get('headline') or '')}</a> "
-                f"<em>({html.escape(n.get('source') or 'source')})</em></li>"
-                for n in news
-            ) or "<li>No matching news items</li>"
+                f"<li><a href='{html.escape(item.get('url', ''))}'>{html.escape(item.get('headline', ''))}</a> "
+                f"<em>({html.escape(item.get('source', 'Unknown'))})</em></li>"
+                for item in news
+            )
+        else:
+            news_items_html = "<li>No relevant news items found</li>"
+        
+        # Create guidance HTML
+        if guidance_lines:
+            guidance_html = "<ul>" + "".join(f"<li>{html.escape(line)}</li>" for line in guidance_lines) + "</ul>"
+        else:
+            guidance_html = "<p style='color:#777'>No explicit guidance found in the accessible text.</p>"
+        
+        return f"""
+        <html>
+          <body style="font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height:1.45; color:#111;">
+            <h2 style="margin:0 0 4px 0">{html.escape(ticker)} — Quarterly Results Recap</h2>
+            <div style="color:#555;">ET Day: {date_str} | Period: {html.escape(str(period))}</div>
+            
+            <table border="0" cellpadding="6" cellspacing="0" style="margin-top:12px; background:#f8f9fb; border-radius:8px;">
+              <tr><td>EPS est</td><td>{self.format_number(eps_est)}</td><td>EPS actual</td><td>{self.format_number(eps_act)}</td></tr>
+              <tr><td>Revenue est</td><td>{self.format_number(rev_est)}</td><td>Revenue actual</td><td>{self.format_number(rev_act)}</td></tr>
+            </table>
 
-            # Guidance block
-            if guidance_lines:
-                guidance_html = "<ul>" + "".join(f"<li>{html.escape(g)}</li>" for g in guidance_lines) + "</ul>"
-            else:
-                guidance_html = "<p style='color:#777'>No explicit guidance found in the accessible text.</p>"
+            <h3 style="margin-top:16px;">Key Takeaways</h3>
+            {ai_summary}
 
-            html_body = f"""
-            <html>
-              <body style="font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height:1.45; color:#111;">
-                <h2 style="margin:0 0 4px 0">{html.escape(t)} — Quarterly Results Recap</h2>
-                <div style="color:#555;">ET Day: {et_day_str} | Reported: {html.escape(date_str)} | Period: {html.escape(str(period))}</div>
-                <table border="0" cellpadding="6" cellspacing="0" style="margin-top:12px; background:#f8f9fb; border-radius:8px;">
-                  <tr><td>EPS est</td><td>{fmt_num(eps_est)}</td><td>EPS actual</td><td>{fmt_num(eps_act)}</td></tr>
-                  <tr><td>Revenue est</td><td>{fmt_num(rev_est)}</td><td>Revenue actual</td><td>{fmt_num(rev_act)}</td></tr>
-                </table>
+            <h3 style="margin-top:16px;">Guidance / Forecast</h3>
+            {guidance_html}
 
-                <h3 style="margin-top:16px;">Key takeaways</h3>
-                {summary_html}
+            <h3 style="margin-top:16px;">Relevant News</h3>
+            <ul>{news_items_html}</ul>
 
-                <h3 style="margin-top:16px;">Guidance / Forecast</h3>
-                {guidance_html}
+            <div style="margin-top:16px; color:#777; font-size:12px;">
+              Automated analysis: Data extracted from earnings reports and press releases. Verify with official filings.
+            </div>
+          </body>
+        </html>
+        """
+    
+    async def send_email(self, subject: str, html_body: str) -> bool:
+        """Send email using configured SMTP settings"""
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["From"] = self.config.SMTP_USER
+            msg["To"] = self.config.EMAIL_TO
+            msg["Subject"] = subject
 
-                <h3 style="margin-top:16px;">Same-day headlines</h3>
-                <ul>{news_items_html}</ul>
+            # Create plain text version
+            text_body = re.sub(r"<[^>]+>", "", html_body)
+            msg.attach(MIMEText(text_body, "plain", "utf-8"))
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-                <div style="margin-top:16px; color:#777; font-size:12px;">
-                  Automated note: Guidance is extracted from accessible press releases/news using heuristics and AI; verify with official filings/IR.
-                </div>
-              </body>
-            </html>
-            """
+            # Send email
+            with smtplib.SMTP(self.config.SMTP_HOST, self.config.SMTP_PORT) as server:
+                server.starttls()
+                server.login(self.config.SMTP_USER, self.config.SMTP_PASS)
+                server.send_message(msg)
+            
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to send email: {e}")
+            return False
+    
+    async def process_ticker(self, ticker: str, date_str: str) -> bool:
+        """Process a single ticker for earnings data"""
+        print(f"[INFO] Processing {ticker}...")
+        
+        try:
+            # Fetch earnings data
+            earnings_list = await self.fetch_earnings_data(ticker, date_str)
+            if not earnings_list:
+                print(f"[INFO] No earnings found for {ticker} on {date_str}")
+                return False
+            
+            # Process each earnings event
+            for earnings in earnings_list:
+                print(f"[INFO] Processing {ticker} {earnings.get('period', 'Unknown')}")
+                
+                # Fetch news and press releases
+                news = await self.fetch_company_news(ticker, date_str)
+                print(f"[INFO] Found {len(news)} relevant news items for {ticker}")
+                
+                # Fetch press release text
+                press_texts = []
+                for item in news[:3]:  # Limit to 3 to avoid too many requests
+                    url = item.get('url', '').strip()
+                    if url:
+                        text = await self.fetch_press_release_text(url)
+                        if text:
+                            press_texts.append(text)
+                
+                # Extract guidance
+                combined_text = "\n".join([
+                    item.get('headline', '') + " " + (item.get('summary', '') or '')
+                    for item in news
+                ] + press_texts)
+                
+                guidance_lines = self.extract_guidance(combined_text)
+                if guidance_lines:
+                    print(f"[INFO] Extracted {len(guidance_lines)} guidance lines for {ticker}")
+                
+                # Generate AI summary
+                ai_summary = await self.generate_ai_summary(
+                    ticker, earnings, guidance_lines, news, press_texts
+                )
+                
+                # Create and send email
+                subject = f"{ticker} — Quarterly Results ({earnings.get('period', 'Unknown')})"
+                html_body = self.create_email_html(
+                    ticker, earnings, guidance_lines, news, ai_summary, date_str
+                )
+                
+                if await self.send_email(subject, html_body):
+                    print(f"[SUCCESS] Sent email for {ticker} {earnings.get('period', 'Unknown')}")
+                    return True
+                else:
+                    print(f"[ERROR] Failed to send email for {ticker}")
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to process {ticker}: {e}")
+            return False
+    
+    async def run(self):
+        """Main execution method"""
+        # Validate configuration
+        missing_config = self.validate_config()
+        if missing_config:
+            print(f"[ERROR] Configuration incomplete. Missing: {', '.join(missing_config)}")
+            return
+        
+        # Print configuration summary
+        self.config.print_summary()
+        
+        # Check if we should run (midnight ET check)
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        if now_et.hour != 0 and not self.config.TEST_MODE:
+            print(f"[INFO] Not midnight ET (now_et={now_et}); exiting.")
+            return
+        
+        # Determine target date
+        if self.config.TEST_MODE:
+            target_date = (now_et - timedelta(days=1)).date()
+        else:
+            target_date = (now_et - timedelta(days=1)).date()
+        
+        date_str = target_date.isoformat()
+        print(f"[INFO] Processing earnings for ET day: {date_str}")
+        
+        # Load tickers
+        try:
+            tickers = self.load_tickers()
+        except Exception as e:
+            print(f"[ERROR] Failed to load tickers: {e}")
+            return
+        
+        # Process tickers
+        success_count = 0
+        total_count = len(tickers)
+        
+        for i, ticker in enumerate(tickers, 1):
+            print(f"[INFO] Processing {ticker} ({i}/{total_count})")
+            
+            if await self.process_ticker(ticker, date_str):
+                success_count += 1
+            
+            # Rate limiting
+            if i < total_count:
+                await asyncio.sleep(self.config.API_DELAY_SECONDS)
+        
+        # Summary
+        if success_count > 0:
+            print(f"[SUCCESS] Processed {total_count} tickers, sent {success_count} emails for {date_str}")
+        else:
+            print(f"[INFO] No earnings found for {date_str} across {total_count} tickers")
 
-            subject = f"{t} — Quarterly results ({period})"
-            try:
-                send_email(smtp_host, smtp_port, smtp_user, smtp_pass, email_to, subject, html_body)
-                print(f"[OK] sent: {t} {period}")
-                sent_any = True
-            except Exception as e:
-                print(f"[ERROR] email failed for {t}: {e}")
-
-        time.sleep(1.0)
-    if not sent_any:
-        print(f"[INFO] No earnings found for ET day {et_day_str} across {len(tickers)} tickers.")
+async def main():
+    """Main entry point"""
+    async with EarningsProcessor() as processor:
+        await processor.run()
 
 if __name__ == "__main__":
-    main()
+    # Run the async main function
+    asyncio.run(main())
