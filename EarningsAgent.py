@@ -414,8 +414,8 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
         
         eps_est = format_number(earnings_data.get('epsEstimate'))
         eps_act = format_number(earnings_data.get('epsActual'))
-        rev_est = format_number(earnings_data.get('revenueEstimate'))
-        rev_act = format_number(earnings_data.get('revenueActual'))
+        rev_est = format_number(earnings_data.get('revenueEstimate') / 1000000)
+        rev_act = format_number(earnings_data.get('revenueActual') / 1000000)
         period = earnings_data.get('period', 'Unknown')
         
         # Calculate beats/misses
@@ -441,8 +441,8 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
                     </tr>
                     <tr>
                         <td style="padding: 8px;"><strong>Revenue:</strong></td>
-                        <td style="padding: 8px;">Estimate: {rev_est}</td>
-                        <td style="padding: 8px;">Actual: {rev_act}</td>
+                        <td style="padding: 8px;">Estimate: {rev_est}M</td>
+                        <td style="padding: 8px;">Actual: {rev_act}M</td>
                         <td style="padding: 8px; color: {'green' if 'Beat' in rev_beat else 'red' if 'Miss' in eps_beat else 'gray'};">{rev_beat}</td>
                     </tr>
                 </table>
