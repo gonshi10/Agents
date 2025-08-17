@@ -286,11 +286,8 @@ Provide 2-3 key insights in bullet points.
             
             content = response.choices[0].message.content
             
-            print(f"✓ Generated AI insights for {len(tickers_data)} tickers in one API call")
-            
             # Debug: Show the raw AI response
-            print(f"🔍 Raw AI response: {content}")
-            print(f"🔍 Response length: {len(content)} characters")
+            print(f"✓ Generated AI insights for {len(tickers_data)} tickers in one API call")
             
             # Parse the response to extract insights for each ticker
             insights = {}
@@ -299,14 +296,11 @@ Provide 2-3 key insights in bullet points.
             
             # More robust parsing - try multiple approaches
             lines = content.split('\n')
-            print(f"🔍 Parsing {len(lines)} lines from AI response")
             
             for i, line in enumerate(lines):
                 line = line.strip()
                 if not line:
                     continue
-                
-                print(f"🔍 Line {i+1}: '{line}'")
                 
                 # Check if this line starts with a ticker symbol
                 ticker_found = None
@@ -319,32 +313,25 @@ Provide 2-3 key insights in bullet points.
                     # Save previous ticker's insights
                     if current_ticker:
                         insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
-                        print(f"✅ Saved insights for {current_ticker}: {len(current_insights)} items")
                     
                     # Start new ticker
                     current_ticker = ticker_found
                     current_insights = []
-                    print(f"🔄 Starting new ticker: {current_ticker}")
                 elif current_ticker and (line.startswith('-') or line.startswith('•') or line.startswith('*')):
                     current_insights.append(line)
-                    print(f"📝 Added insight: {line}")
                 elif current_ticker and line:
                     # If line doesn't start with bullet but has content, treat as insight
                     current_insights.append(f"• {line}")
-                    print(f"📝 Added insight (with bullet): • {line}")
             
             # Save last ticker's insights
             if current_ticker:
                 insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
-                print(f"✅ Saved insights for {current_ticker}: {len(current_insights)} items")
             
             # Fill in any missing tickers
             for ticker in tickers_data.keys():
                 if ticker not in insights:
                     insights[ticker] = "AI insights unavailable"
-                    print(f"⚠️ No insights found for {ticker}, setting to unavailable")
             
-            print(f"🔍 Final insights: {insights}")
             return insights
             
         except Exception as e:
@@ -392,7 +379,7 @@ Provide 2-3 key insights in bullet points.
         return guidance_insights[:3]  # Return top 3 most relevant
     
     def create_email_content(self, ticker, earnings_data, news_data, ai_insights):
-        """Create email content"""
+        """Create simple, clean email content"""
         # Format numbers as floats with 2 decimal places
         def format_number(value):
             if value is None or value == 'N/A':
@@ -404,55 +391,313 @@ Provide 2-3 key insights in bullet points.
         
         eps_est = format_number(earnings_data.get('epsEstimate'))
         eps_act = format_number(earnings_data.get('epsActual'))
-        rev_est = format_number(earnings_data.get('revenueEstimate') / 1000000)
-        rev_act = format_number(earnings_data.get('revenueActual') / 1000000)
+        
+        # Handle revenue conversion properly
+        try:
+            rev_est_raw = earnings_data.get('revenueEstimate')
+            rev_act_raw = earnings_data.get('revenueActual')
+            
+            if rev_est_raw and rev_est_raw != 'N/A':
+                rev_est_val = float(rev_est_raw)
+                if rev_est_val >= 1_000_000_000:
+                    rev_est = f"{format_number(rev_est_val / 1_000_000_000)}B"
+                else:
+                    rev_est = f"{format_number(rev_est_val / 1_000_000)}M"
+            else:
+                rev_est = 'N/A'
+                
+            if rev_act_raw and rev_act_raw != 'N/A':
+                rev_act_val = float(rev_act_raw)
+                if rev_act_val >= 1_000_000_000:
+                    rev_act = f"{format_number(rev_act_val / 1_000_000_000)}B"
+                else:
+                    rev_act = f"{format_number(rev_act_val / 1_000_000)}M"
+            else:
+                rev_act = 'N/A'
+        except (ValueError, TypeError):
+            rev_est = rev_act = 'N/A'
         
         # Calculate beats/misses
         try:
-            eps_beat = "✓ Beat" if eps_act and eps_est and float(eps_act) > float(eps_est) else "✗ Miss" if eps_act and eps_est and float(eps_act) < float(eps_est) else "—"
-            rev_beat = "✓ Beat" if rev_act and rev_est and float(rev_act) > float(rev_est) else "✗ Miss" if rev_act and rev_est and float(rev_act) < float(rev_est) else "—"
-        except (ValueError, TypeError):
+            # Check if we have valid data for comparison
+            eps_est_valid = earnings_data.get('epsEstimate') and earnings_data.get('epsEstimate') != 'N/A'
+            eps_act_valid = earnings_data.get('epsActual') and earnings_data.get('epsActual') != 'N/A'
+            rev_est_valid = earnings_data.get('revenueEstimate') and earnings_data.get('revenueEstimate') != 'N/A'
+            rev_act_valid = earnings_data.get('revenueActual') and earnings_data.get('revenueActual') != 'N/A'
+            
+            if eps_est_valid and eps_act_valid:
+                eps_beat = "✓ HIT" if float(earnings_data.get('epsActual')) > float(earnings_data.get('epsEstimate')) else "✗ MISS"
+            else:
+                eps_beat = "—"
+                
+            if rev_est_valid and rev_act_valid:
+                rev_beat = "✓ HIT" if float(earnings_data.get('revenueActual')) > float(earnings_data.get('revenueEstimate')) else "✗ MISS"
+            else:
+                rev_beat = "—"
+             
+        except (ValueError, TypeError) as e:
             eps_beat = rev_beat = "—"
         
+        # Simple, clean HTML
         html_content = f"""
+        <!DOCTYPE html>
         <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2 style="color: #2c3e50;">{ticker} Earnings Report</h2>
-            
-            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="margin-top: 0;">Financial Results</h3>
-                <table style="width: 100%; border-collapse: collapse;">
-                    <tr style="border-bottom: 1px solid #dee2e6;">
-                        <td style="padding: 8px;"><strong>EPS:</strong></td>
-                        <td style="padding: 8px;">Estimate: {eps_est}</td>
-                        <td style="padding: 8px;">Actual: {eps_act}</td>
-                        <td style="padding: 8px; color: {'green' if 'Beat' in eps_beat else 'red' if 'Miss' in eps_beat else 'gray'};">{eps_beat}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding: 8px;"><strong>Revenue:</strong></td>
-                        <td style="padding: 8px;">Estimate: {rev_est}M</td>
-                        <td style="padding: 8px;">Actual: {rev_act}M</td>
-                        <td style="padding: 8px; color: {'green' if 'Beat' in rev_beat else 'red' if 'Miss' in eps_beat else 'gray'};">{rev_beat}</td>
-                    </tr>
-                </table>
+        <head>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    max-width: 600px;
+                    margin: 0 auto;
+                    padding: 20px;
+                    background-color: #f9f9f9;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 25px;
+                    border-radius: 12px;
+                    text-align: center;
+                    margin-bottom: 25px;
+                }}
+                .header h1 {{
+                    margin: 0;
+                    font-size: 2em;
+                    font-weight: 300;
+                }}
+                .card {{
+                    background: white;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                /* New styles for dashboard grid */
+                .dashboard-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-top: 20px;
+                }}
+                .metric-card {{
+                    background: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    border-radius: 8px;
+                    padding: 20px;
+                    text-align: center;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                }}
+                .metric-header {{
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin-bottom: 15px;
+                    color: #495057;
+                }}
+                .metric-icon {{
+                    font-size: 2em;
+                    margin-right: 10px;
+                }}
+                .metric-title {{
+                    font-size: 1.1em;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }}
+                .metric-values {{
+                    margin-bottom: 15px;
+                }}
+                .actual-value {{
+                    font-size: 2.5em;
+                    font-weight: bold;
+                    color: #2c3e50;
+                }}
+                .estimate-value {{
+                    font-size: 0.9em;
+                    color: #6c757d;
+                    margin-top: 5px;
+                }}
+                .progress-container {{
+                    margin-top: 15px;
+                }}
+                .progress-bar {{
+                    height: 10px;
+                    background-color: #e9ecef;
+                    border-radius: 5px;
+                    overflow: hidden;
+                    margin-bottom: 8px;
+                }}
+                .progress-fill {{
+                    height: 100%;
+                    border-radius: 5px;
+                    background: linear-gradient(to right, #28a745, #6c757d, #dc3545);
+                    transition: width 0.3s ease-in-out;
+                }}
+                .progress-fill.hit {{
+                    background: linear-gradient(to right, #28a745, #20c997);
+                }}
+                .progress-fill.miss {{
+                    background: linear-gradient(to right, #dc3545, #fd7e14);
+                }}
+                .progress-fill.neutral {{
+                    background: linear-gradient(to right, #6c757d, #495057);
+                }}
+                .progress-label {{
+                    font-size: 0.9em;
+                    font-weight: 600;
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    display: inline-block;
+                    min-width: 80px;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }}
+                .progress-label.hit {{
+                    background: #d4edda;
+                    color: #155724;
+                    border: 1px solid #c3e6cb;
+                }}
+                .progress-label.miss {{
+                    background: #f8d7da;
+                    color: #721c24;
+                    border: 1px solid #f5c6cb;
+                }}
+                .progress-label.neutral {{
+                    background: #e2e3e5;
+                    color: #383d41;
+                    border: 1px solid #d6d8db;
+                }}
+                .insights {{
+                    background: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    padding: 20px;
+                    border-radius: 4px;
+                    line-height: 1.8;
+                }}
+                .insights p {{
+                    margin: 0 0 15px 0;
+                }}
+                .insights p:last-child {{
+                    margin-bottom: 0;
+                }}
+                .news-item {{
+                    padding: 10px 0;
+                    border-bottom: 1px solid #eee;
+                }}
+                .news-item:last-child {{
+                    border-bottom: none;
+                }}
+                .news-item a {{
+                    color: #007bff;
+                    text-decoration: none;
+                }}
+                .news-item a:hover {{
+                    text-decoration: underline;
+                }}
+                .footer {{
+                    text-align: center;
+                    color: #6c757d;
+                    font-size: 0.9em;
+                    margin-top: 30px;
+                }}
+                .performance-status {{
+                    font-size: 1em;
+                    font-weight: bold;
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    display: inline-block;
+                    min-width: 100px;
+                    text-align: center;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-top: 10px;
+                    margin-bottom: 10px;
+                }}
+                .performance-status.hit {{
+                    background: #d4edda;
+                    color: #155724;
+                    border: 2px solid #c3e6cb;
+                }}
+                .performance-status.miss {{
+                    background: #f8d7da;
+                    color: #721c24;
+                    border: 2px solid #f5c6cb;
+                }}
+                .performance-status.neutral {{
+                    background: #e2e3e5;
+                    color: #383d41;
+                    border: 2px solid #d6d8db;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>{ticker}</h1>
+                <p>Earnings Report</p>
             </div>
             
-            <div style="margin: 20px 0;">
-                <h3>AI-Generated Insights</h3>
-                <div style="background: #fff3cd; padding: 15px; border-left: 4px solid #ffc107; border-radius: 4px;">
-                    {ai_insights.replace(chr(10), '<br>')}
+            <div class="card">
+                <h3 style="margin-top: 0; color: #495057;">📊 Financial Results</h3>
+                
+                <div class="dashboard-grid">
+                    <!-- EPS Section -->
+                    <div class="metric-card eps-card">
+                        <div class="metric-header">
+                            <span class="metric-icon">📈</span>
+                            <span class="metric-title">Earnings Per Share</span>
+                        </div>
+                        <div class="metric-values">
+                            <div class="actual-value">{eps_act}</div>
+                            <div class="estimate-value">Est: {eps_est}</div>
+                            <div class="performance-status {'hit' if 'HIT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}">
+                                {eps_beat.replace('✓ ', '').replace('✗ ', '') if eps_beat != '—' else '—'}
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill {'hit' if 'HIT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}" style="width: {'85%' if 'HIT' in eps_beat else '65%' if 'MISS' in eps_beat else '50%'}"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Revenue Section -->
+                    <div class="metric-card revenue-card">
+                        <div class="metric-header">
+                            <span class="metric-icon">💰</span>
+                            <span class="metric-title">Revenue</span>
+                        </div>
+                        <div class="metric-values">
+                            <div class="actual-value">{rev_act}</div>
+                            <div class="estimate-value">Est: {rev_est}</div>
+                            <div class="performance-status {'hit' if 'HIT' in rev_beat else 'miss' if 'MISS' in rev_beat else 'neutral'}">
+                                {rev_beat.replace('✓ ', '').replace('✗ ', '') if rev_beat != '—' else '—'}
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill {'hit' if 'HIT' in rev_beat else 'miss' if 'MISS' in rev_beat else '50%'}"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <div style="margin: 20px 0;">
-                <h3>Recent News</h3>
-                <ul>
-                    {chr(10).join([f'<li><a href="{item.get("url", "#")}" target="_blank">{item.get("headline", "N/A")}</a></li>' for item in news_data[:3]])}
-                </ul>
+            <div class="card">
+                <h3 style="margin-top: 0; color: #495057;">🧠 AI Insights</h3>
+                <div class="insights">
+                    {ai_insights.replace('**', '<strong>').replace('**', '</strong>').replace(chr(10), '</p><p>')}
+                </div>
             </div>
             
-            <div style="margin-top: 30px; padding: 15px; background: #e9ecef; border-radius: 4px; font-size: 12px; color: #6c757d;">
-                Generated by Smart Earnings Agent on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            <div class="card">
+                <h3 style="margin-top: 0; color: #495057;">📰 Recent News</h3>
+                {chr(10).join([f'<div class="news-item"><a href="{item.get("url", "#")}" target="_blank">{item.get("headline", "N/A")}</a></div>' for item in news_data[:3]])}
+            </div>
+            
+            <div class="footer">
+                Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}<br>
+                Powered by OpenAI GPT-3.5 Turbo
             </div>
         </body>
         </html>
@@ -460,7 +705,7 @@ Provide 2-3 key insights in bullet points.
         
         return html_content
     
-    def send_email(self, subject, html_content):
+    def send_email(self, ticker, subject, html_content, earnings_data, news_data, ai_insights):
         """Send email"""
         try:
             msg = MIMEMultipart('alternative')
@@ -468,18 +713,46 @@ Provide 2-3 key insights in bullet points.
             msg['To'] = self.email_to
             msg['Subject'] = subject
             
-            # Create plain text version
-            text_content = html_content.replace('<br>', '\n').replace('<li>', '• ').replace('</li>', '')
-            text_content = text_content.replace('<strong>', '').replace('</strong>', '')
-            text_content = text_content.replace('<h2>', '\n\n').replace('</h2>', '\n')
-            text_content = text_content.replace('<h3>', '\n').replace('</h3>', '\n')
-            text_content = text_content.replace('<div>', '').replace('</div>', '')
-            text_content = text_content.replace('<table>', '').replace('</table>', '')
-            text_content = text_content.replace('<tr>', '').replace('</tr>', '')
-            text_content = text_content.replace('<td>', ' | ').replace('</td>', '')
-            text_content = text_content.replace('<ul>', '').replace('</ul>', '')
-            text_content = text_content.replace('<a href="', '').replace('" target="_blank">', ': ')
-            text_content = text_content.replace('</a>', '')
+            # Format revenue numbers for plain text
+            def format_revenue(value):
+                if value is None or value == 'N/A':
+                    return 'N/A'
+                try:
+                    val = float(value)
+                    if val >= 1_000_000_000:
+                        return f"{val / 1_000_000_000:.2f}B"
+                    else:
+                        return f"{val / 1_000_000:.2f}M"
+                except (ValueError, TypeError):
+                    return str(value)
+            
+            rev_est = format_revenue(earnings_data.get('revenueEstimate'))
+            rev_act = format_revenue(earnings_data.get('revenueActual'))
+            
+            # Create simple plain text version
+            text_content = f"""
+ {ticker} EARNINGS REPORT
+ {'=' * (len(ticker) + 16)}
+ 
+ 📊 FINANCIAL RESULTS
+ {'-' * 20}
+ 
+ EPS: {earnings_data.get('epsEstimate', 'N/A')} → {earnings_data.get('epsActual', 'N/A')}
+ Revenue: {rev_est} → {rev_act}
+ 
+ 🧠 AI INSIGHTS
+ {'-' * 15}
+ {ai_insights.replace('<br>', '\n').replace('<strong>', '').replace('</strong>', '')}
+ 
+ 📰 RECENT NEWS
+ {'-' * 15}
+ {chr(10).join([f'• {item.get("headline", "N/A")}' for item in news_data[:3]])}
+ 
+ {'=' * 40}
+ Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+ Powered by OpenAI GPT-3.5 Turbo
+ {'=' * 40}
+ """
             
             # Remove HTML tags
             import re
@@ -566,7 +839,7 @@ Provide 2-3 key insights in bullet points.
             subject = f"{ticker} Earnings Report"
             html_content = self.create_email_content(ticker, data['earnings'], data['news'], ai_insights.get(ticker, 'No insights available'))
             
-            if self.send_email(subject, html_content):
+            if self.send_email(ticker, subject, html_content, data['earnings'], data['news'], ai_insights.get(ticker, 'No insights available')):
                 emails_sent += 1
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
