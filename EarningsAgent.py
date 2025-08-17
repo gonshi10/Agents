@@ -14,11 +14,9 @@ import requests
 import smtplib
 import time
 import random
-import json
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Dict, Any
 from dotenv import load_dotenv
 from openai import OpenAI
 load_dotenv()
@@ -31,6 +29,7 @@ class EarningsAgent:
         self.smtp_user = os.getenv('SMTP_USER')
         self.smtp_pass = os.getenv('SMTP_PASS')
         self.email_to = os.getenv('EMAIL_TO')
+        self.model = os.getenv('OPENAI_MODEL')
         
         # Initialize OpenAI client
         if self.openai_key:
@@ -241,7 +240,7 @@ Provide 2-3 key insights in bullet points.
             
             # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -277,7 +276,7 @@ Provide 2-3 key insights in bullet points.
             
             # Use OpenAI SDK for batch processing
             response = self.openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. For each company, provide 3-4 sophisticated insights that focus on guidance analysis, strategic implications, risk factors, and investment thesis. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -576,12 +575,10 @@ Provide 2-3 key insights in bullet points.
 def main():
     """Main entry point"""
     import sys
-    
-    test_mode = True
-    
+
     try:
         agent = EarningsAgent()
-        agent.run(test_mode=test_mode)
+        agent.run(test_mode=os.getenv('TEST_MODE') == 'true')
     except Exception as e:
         print(f"❌ Fatal error: {e}")
         sys.exit(1)
