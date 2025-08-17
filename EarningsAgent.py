@@ -4,7 +4,7 @@ Smart Earnings Agent - Intelligent Stock Earnings Monitor with AI Insights
 - Automatically fetches earnings data for stocks in watchlist.csv
 - Uses AI to generate comprehensive summaries and insights
 - Sends detailed email reports for each earnings announcement
-- Smart API batching and rate limiting
+- Smart API batching and rate limiting with OpenAI best practices
 - Built-in error handling and reliability
 """
 
@@ -31,10 +31,22 @@ class EarningsAgent:
         self.smtp_pass = os.getenv('SMTP_PASS')
         self.email_to = os.getenv('EMAIL_TO')
         
-        # OpenAI rate limiting settings
-        self.openai_calls_per_minute = 3  # Conservative limit
+        # Enhanced OpenAI rate limiting with best practices
+        self.openai_calls_per_minute = 1  # Very conservative - 1 call per minute
         self.last_openai_call = 0
         self.openai_call_times = []
+        
+        # Token management to stay within TPM limits
+        self.max_tokens_per_request = 300  # Conservative token limit
+        self.max_input_tokens = 2000  # Limit input size
+        
+        # Caching to avoid duplicate API calls
+        self.insights_cache = {}
+        
+        # Rate limit tracking from headers
+        self.rate_limit_requests = None
+        self.rate_limit_tokens = None
+        self.rate_limit_reset = None
         
         # Validate required config
         if not all([self.finnhub_key, self.smtp_user, self.smtp_pass, self.email_to]):
@@ -112,14 +124,26 @@ class EarningsAgent:
                     relevant_news.append(item)
             
             print(f"✓ Found {len(relevant_news)} relevant news items for {ticker}")
-            return relevant_news[:5]  # Limit to top 5
+            return relevant_news[:3]  # Limit to top 3 to reduce tokens
             
         except Exception as e:
             print(f"✗ Failed to get news for {ticker}: {e}")
             return []
     
+    def update_rate_limits_from_headers(self, response):
+        """Extract rate limit information from OpenAI response headers"""
+        try:
+            self.rate_limit_requests = response.headers.get('x-ratelimit-limit-requests')
+            self.rate_limit_tokens = response.headers.get('x-ratelimit-limit-tokens')
+            self.rate_limit_reset = response.headers.get('x-ratelimit-reset-requests')
+            
+            if self.rate_limit_requests:
+                print(f"�� Rate limits: {self.rate_limit_requests} req/min, {self.rate_limit_tokens} tokens/min")
+        except Exception as e:
+            print(f"⚠️ Could not parse rate limit headers: {e}")
+    
     def wait_for_openai_rate_limit(self):
-        """Wait if we're hitting OpenAI rate limits"""
+        """Enhanced rate limiting with header-based information"""
         now = time.time()
         
         # Remove calls older than 1 minute
@@ -127,20 +151,116 @@ class EarningsAgent:
         
         # If we've made too many calls recently, wait
         if len(self.openai_call_times) >= self.openai_calls_per_minute:
-            wait_time = 60 - (now - self.openai_call_times[0]) + random.uniform(1, 5)
+            wait_time = 60 - (now - self.openai_call_times[0]) + random.uniform(5, 10)
             print(f"⏳ OpenAI rate limit reached. Waiting {wait_time:.1f}s...")
             time.sleep(wait_time)
             now = time.time()
         
         # Add jitter to prevent thundering herd
-        jitter = random.uniform(0.5, 2.0)
+        jitter = random.uniform(2.0, 5.0)
         time.sleep(jitter)
         
         self.openai_call_times.append(now)
         self.last_openai_call = now
     
+    def optimize_context_for_tokens(self, tickers_data):
+        """Optimize context to stay within token limits"""
+        optimized_context = "Analyze earnings results and provide 2-3 key insights per company:\n\n"
+        
+        for ticker, data in tickers_data.items():
+            earnings = data['earnings']
+            news = data['news']
+            
+            # Truncate news headlines to save tokens
+            news_summary = []
+            for item in news[:2]:  # Only first 2 news items
+                headline = item.get('headline', '')[:40]  # Limit headline length
+                news_summary.append(headline)
+            
+            # Create concise context
+            context_line = f"{ticker}: EPS {earnings.get('epsEstimate', 'N/A')}→{earnings.get('epsActual', 'N/A')}, Rev {earnings.get('revenueEstimate', 'N/A')}→{earnings.get('revenueActual', 'N/A')}, News: {'; '.join(news_summary)}\n"
+            
+            optimized_context += context_line
+        
+        optimized_context += "\nFormat: TICKER: [2-3 bullet points]"
+        return optimized_context
+    
+    def generate_ai_insights_single(self, ticker, earnings_data, news_data):
+        """Generate AI insights for a single ticker - fallback method"""
+        if not self.openai_key:
+            return "AI insights disabled - set OPENAI_API_KEY to enable"
+        
+        # Check cache first
+        cache_key = f"{ticker}_{earnings_data.get('period', 'Unknown')}_{earnings_data.get('epsActual', 'N/A')}"
+        if cache_key in self.insights_cache:
+            print(f"✓ Using cached insights for {ticker}")
+            return self.insights_cache[cache_key]
+        
+        try:
+            # Wait for rate limiting
+            self.wait_for_openai_rate_limit()
+            
+            # Build optimized context for single ticker
+            context = f"""
+Analyze earnings results for {ticker}:
+
+Period: {earnings_data.get('period', 'Unknown')}
+EPS: Est {earnings_data.get('epsEstimate', 'N/A')} vs Actual {earnings_data.get('epsActual', 'N/A')}
+Revenue: Est {earnings_data.get('revenueEstimate', 'N/A')} vs Actual {earnings_data.get('revenueActual', 'N/A')}
+
+News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
+
+Provide 2-3 key insights in bullet points.
+"""
+            
+            headers = {
+                'Authorization': f'Bearer {self.openai_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'model': 'gpt-4o-mini',
+                'messages': [
+                    {'role': 'system', 'content': 'You are a financial analyst. Provide concise, actionable insights.'},
+                    {'role': 'user', 'content': context}
+                ],
+                'max_tokens': self.max_tokens_per_request,
+                'temperature': 0.3
+            }
+            
+            response = requests.post(
+                'https://api.openai.com/v1/chat/completions',
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            # Update rate limit information
+            self.update_rate_limits_from_headers(response)
+            
+            if response.status_code == 429:
+                retry_after = response.headers.get('Retry-After', 60)
+                print(f"⏳ Rate limited for {ticker}, waiting {retry_after}s (Retry-After header)...")
+                time.sleep(int(retry_after))
+                return f"AI insights temporarily unavailable for {ticker} due to rate limiting"
+            
+            response.raise_for_status()
+            
+            data = response.json()
+            content = data['choices'][0]['message']['content']
+            
+            # Cache the result
+            self.insights_cache[cache_key] = content
+            
+            print(f"✓ Generated AI insights for {ticker}")
+            return content
+            
+        except Exception as e:
+            print(f"✗ AI insights failed for {ticker}: {e}")
+            return f"AI insights unavailable: {str(e)}"
+    
     def generate_batched_ai_insights(self, tickers_data):
-        """Generate AI insights for multiple tickers in one API call"""
+        """Generate AI insights for multiple tickers in one API call with token optimization"""
         if not self.openai_key:
             return {ticker: "AI insights disabled - set OPENAI_API_KEY to enable" for ticker in tickers_data.keys()}
         
@@ -148,23 +268,8 @@ class EarningsAgent:
             # Wait for rate limiting
             self.wait_for_openai_rate_limit()
             
-            # Build context for all tickers
-            context = "Please analyze the following earnings results and provide 2-3 key insights for each company:\n\n"
-            
-            for ticker, data in tickers_data.items():
-                earnings = data['earnings']
-                news = data['news']
-                
-                context += f"""
-{ticker}:
-- Period: {earnings.get('period', 'Unknown')}
-- EPS: Est {earnings.get('epsEstimate', 'N/A')} vs Actual {earnings.get('epsActual', 'N/A')}
-- Revenue: Est {earnings.get('revenueEstimate', 'N/A')} vs Actual {earnings.get('revenueActual', 'N/A')}
-- News: {', '.join([item.get('headline', 'N/A')[:50] for item in news[:2]])}
-
-"""
-            
-            context += "\nProvide insights in this format:\nTICKER: [2-3 bullet points]\nTICKER: [2-3 bullet points]\n..."
+            # Optimize context to stay within token limits
+            context = self.optimize_context_for_tokens(tickers_data)
             
             headers = {
                 'Authorization': f'Bearer {self.openai_key}',
@@ -177,7 +282,7 @@ class EarningsAgent:
                     {'role': 'system', 'content': 'You are a financial analyst. Provide concise, actionable insights for each company.'},
                     {'role': 'user', 'content': context}
                 ],
-                'max_tokens': 800,
+                'max_tokens': self.max_tokens_per_request * len(tickers_data),  # Scale tokens with ticker count
                 'temperature': 0.3
             }
             
@@ -187,6 +292,17 @@ class EarningsAgent:
                 json=payload,
                 timeout=60
             )
+            
+            # Update rate limit information
+            self.update_rate_limits_from_headers(response)
+            
+            if response.status_code == 429:
+                retry_after = response.headers.get('Retry-After', 60)
+                print(f"⏳ Batch API call rate limited, waiting {retry_after}s (Retry-After header)...")
+                time.sleep(int(retry_after))
+                print("🔄 Falling back to individual API calls...")
+                return self.generate_individual_insights(tickers_data)
+            
             response.raise_for_status()
             
             data = response.json()
@@ -231,7 +347,27 @@ class EarningsAgent:
             
         except Exception as e:
             print(f"✗ Batched AI insights failed: {e}")
-            return {ticker: f"AI insights unavailable: {str(e)}" for ticker in tickers_data.keys()}
+            print("⏳ Falling back to individual API calls...")
+            return self.generate_individual_insights(tickers_data)
+    
+    def generate_individual_insights(self, tickers_data):
+        """Generate AI insights for each ticker individually - fallback method"""
+        print("🔄 Generating insights individually to avoid rate limiting...")
+        
+        insights = {}
+        for i, (ticker, data) in enumerate(tickers_data.items()):
+            print(f" Processing {ticker} ({i+1}/{len(tickers_data)})...")
+            
+            insight = self.generate_ai_insights_single(ticker, data['earnings'], data['news'])
+            insights[ticker] = insight
+            
+            # Wait between individual calls to avoid rate limiting
+            if i < len(tickers_data) - 1:
+                wait_time = random.uniform(10, 15)
+                print(f"⏳ Waiting {wait_time:.1f}s before next ticker...")
+                time.sleep(wait_time)
+        
+        return insights
     
     def create_email_content(self, ticker, earnings_data, news_data, ai_insights):
         """Create email content"""
@@ -266,7 +402,7 @@ class EarningsAgent:
                         <td style="padding: 8px;"><strong>Revenue:</strong></td>
                         <td style="padding: 8px;">Estimate: {rev_est}</td>
                         <td style="padding: 8px;">Actual: {rev_act}</td>
-                        <td style="padding: 8px; color: {'green' if 'Beat' in rev_beat else 'red' if 'Miss' in rev_beat else 'gray'};">{rev_beat}</td>
+                        <td style="padding: 8px; color: {'green' if 'Beat' in rev_beat else 'red' if 'Miss' in eps_beat else 'gray'};">{rev_beat}</td>
                     </tr>
                 </table>
             </div>
@@ -336,8 +472,8 @@ class EarningsAgent:
             return False
     
     def run(self, test_mode=False):
-        """Main execution with smart batching"""
-        print("🚀 Starting Smart Earnings Agent...")
+        """Main execution with smart batching and fallback"""
+        print("🚀 Starting Smart Earnings Agent with OpenAI Best Practices...")
         
         # Determine date to check
         if test_mode:
@@ -383,8 +519,9 @@ class EarningsAgent:
             return
         
         print(f"\n🤖 Generating AI insights for {len(tickers_data)} tickers...")
+        print("💡 Using OpenAI best practices: token optimization, smart batching, and fallback strategies")
         
-        # Generate AI insights in batches
+        # Try batch processing first, fallback to individual if needed
         ai_insights = self.generate_batched_ai_insights(tickers_data)
         
         print(f"\n📧 Sending emails...")
@@ -403,6 +540,7 @@ class EarningsAgent:
                 emails_sent += 1
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
+        print(f"�� Rate limit info: {self.rate_limit_requests} req/min, {self.rate_limit_tokens} tokens/min")
 
 def main():
     """Main entry point"""
