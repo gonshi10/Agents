@@ -30,6 +30,7 @@ from email.mime.text import MIMEText
 from typing import List, Optional, Tuple
 import requests
 from zoneinfo import ZoneInfo
+import time
 
 # ----- DEBUG Vars -----
 LOCAL = False
@@ -197,13 +198,18 @@ def extract_guidance_lines_from_text(text: str) -> List[str]:
 
 # ---------- AI summarization ----------
 SUMMARY_SYSTEM_PROMPT = (
-    "You are an equity research assistant. Write a crisp, investor-grade daily recap for a single ticker's "
-    "quarterly report that occurred today (US Eastern). Return 5–8 short bullet points covering: "
-    "(1) headline results vs estimates (EPS/revenue), "
-    "(2) YoY/Seq color if available, "
-    "(3) explicit guidance/outlook (forecasts) with numbers/ranges if present, "
-    "(4) key drivers (segments/geos), and "
-    "(5) likely implications (bull/bear). Keep it neutral, specific, and concise."
+    "You are an equity research assistant. Write a crisp, investor-grade recap (5–8 bullets) of a single ticker's "
+    "quarterly results for today (US Eastern). PRIORITIZE NUMBERS and DELTAS. Each bullet should carry concrete data. "
+    "Cover, in order: "
+    "1) EPS and revenue vs consensus (beat/miss and magnitude), "
+    "2) YoY and/or sequential growth rates for revenue/EPS/GM/OpInc if present, "
+    "3) guidance/forecast (explicit ranges/points) and whether raised/lowered vs prior, "
+    "4) margins (gross/operating) and notable changes, "
+    "5) segment/geography movers (with %/bps where available), "
+    "6) capital returns (buybacks/dividends) and capex, "
+    "7) backlog/bookings and demand commentary if present, "
+    "8) concise implications (drivers/risks) grounded in the facts above. "
+    "Avoid generic phrasing. No headlines, no fluff. Use short bullets."
 )
 
 def _coerce_float(x):
@@ -291,7 +297,7 @@ def main():
         return
 
     # The ET day that just ended
-    target_et_day = (now_et - timedelta(days=1)).date()
+    target_et_day = (datetime.today() - timedelta(days=3)).date() if TEST else (now_et - timedelta(days=1)).date()
     et_day_str = target_et_day.isoformat()
 
     finnhub_key = env("FINNHUB_API_KEY")
@@ -416,6 +422,7 @@ def main():
             except Exception as e:
                 print(f"[ERROR] email failed for {t}: {e}")
 
+        time.sleep(1.0)
     if not sent_any:
         print(f"[INFO] No earnings found for ET day {et_day_str} across {len(tickers)} tickers.")
 
