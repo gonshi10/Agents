@@ -6,10 +6,11 @@ An intelligent AI-powered system that automatically monitors stock earnings, gen
 
 - **Automated Earnings Monitoring**: Fetches earnings data for stocks in your watchlist
 - **AI-Powered Analysis**: Uses OpenAI GPT-4 to generate key takeaways and insights
-- **Press Release Analysis**: Extracts and analyzes press release text for guidance and context
+- **Smart API Batching**: Processes multiple tickers in a single AI call for efficiency
+- **Intelligent Rate Limiting**: Built-in OpenAI API rate limiting with exponential backoff
 - **Smart Email Reports**: Sends detailed, formatted emails for each earnings announcement
-- **Guidance Extraction**: Automatically identifies and extracts forward-looking guidance
-- **Rate Limiting**: Built-in API rate limiting to respect service limits
+- **News Integration**: Fetches and filters relevant company news
+- **Beat/Miss Analysis**: Automatically calculates EPS and revenue performance vs estimates
 
 ## 📋 Requirements
 
@@ -55,15 +56,6 @@ An intelligent AI-powered system that automatically monitors stock earnings, gen
 | `SMTP_PASS` | Your email password/app password | `password123` |
 | `EMAIL_TO` | Recipient email address | `recipient@example.com` |
 
-### Optional Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_MODEL` | OpenAI model to use | `gpt-4o-mini` |
-| `TEST_MODE` | Enable test mode | `false` |
-| `LOCAL_MODE` | Enable local development | `false` |
-| `API_DELAY_SECONDS` | Delay between API calls | `1.0` |
-
 ### Watchlist Configuration
 
 Create a CSV file with your stock symbols:
@@ -88,24 +80,17 @@ python EarningsAgent.py
 ### Test Mode
 
 ```bash
-TEST_MODE=true python EarningsAgent.py
-```
-
-### Local Development
-
-```bash
-LOCAL_MODE=true python EarningsAgent.py
+python EarningsAgent.py --test
 ```
 
 ## 📧 Email Output
 
 The system generates comprehensive email reports including:
 
-- **Earnings Summary**: EPS and revenue vs estimates
-- **AI-Generated Key Takeaways**: 5-8 bullet points with insights
-- **Guidance Analysis**: Forward-looking statements and forecasts
+- **Earnings Summary**: EPS and revenue vs estimates with beat/miss indicators
+- **AI-Generated Key Takeaways**: 2-3 bullet points with insights per company
 - **News Headlines**: Relevant same-day news and press releases
-- **Data Tables**: Formatted financial metrics
+- **Data Tables**: Formatted financial metrics with visual indicators
 
 ## 🔄 Automation
 
@@ -148,17 +133,16 @@ jobs:
 ## 🔍 How It Works
 
 1. **Data Collection**: Fetches earnings calendar and company news from Finnhub
-2. **Content Extraction**: Downloads and analyzes press release text
-3. **AI Analysis**: Generates insights using OpenAI GPT-4
-4. **Guidance Extraction**: Uses regex patterns to identify forward-looking statements
-5. **Email Generation**: Creates formatted HTML emails with all insights
-6. **Delivery**: Sends individual emails for each earnings announcement
+2. **Smart Batching**: Collects data for all tickers, then processes with AI in one call
+3. **AI Analysis**: Generates insights for all companies using OpenAI GPT-4
+4. **Email Generation**: Creates formatted HTML emails with all insights
+5. **Delivery**: Sends individual emails for each earnings announcement
 
 ## 📊 API Usage
 
-- **Finnhub**: ~2-3 calls per ticker (earnings + news)
-- **OpenAI**: 1 call per earnings announcement
-- **Rate Limiting**: Built-in delays prevent API abuse
+- **Finnhub**: ~2 calls per ticker (earnings + news)
+- **OpenAI**: 1 call total for all tickers (smart batching)
+- **Rate Limiting**: Built-in delays and exponential backoff
 
 ## 🚨 Troubleshooting
 
@@ -166,13 +150,13 @@ jobs:
 
 1. **Missing API Keys**: Check your `.env` file
 2. **SMTP Errors**: Verify email credentials and app passwords
-3. **Rate Limiting**: Increase `API_DELAY_SECONDS` if needed
+3. **OpenAI Rate Limiting**: The system automatically handles this with smart batching
 4. **No Earnings Found**: Check date logic and ticker symbols
 
 ### Debug Mode
 
 ```bash
-LOCAL_MODE=true TEST_MODE=true python EarningsAgent.py
+python EarningsAgent.py --test
 ```
 
 ## 🤝 Contributing

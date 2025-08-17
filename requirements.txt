@@ -1,17 +1,5 @@
-# HTTP requests to APIs (Finnhub, OpenAI, news)
+# HTTP requests to APIs (Finnhub, OpenAI)
 requests>=2.31.0
 
-# Async HTTP client for improved performance
-aiohttp>=3.8.0
-
-# Async support
-asyncio
-
-# Send emails (SMTP is built-in, but MIME handling is in stdlib)
-# no external dependency needed for email
-
-# CSV + datetime + os + html.escape are in stdlib
-# so no extra packages required
-
-# Optional: if you later want dotenv for local testing
+# Optional: for local development with .env files
 python-dotenv>=1.0.0
