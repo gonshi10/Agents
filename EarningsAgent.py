@@ -31,7 +31,7 @@ from typing import List, Optional, Tuple
 import requests
 from zoneinfo import ZoneInfo
 
-LOCAL = True
+LOCAL = False
 if LOCAL:
     from dotenv import load_dotenv
     load_dotenv()
