@@ -14,11 +14,9 @@ import requests
 import smtplib
 import time
 import random
-import json
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import List, Dict, Any
 from dotenv import load_dotenv
 from openai import OpenAI
 load_dotenv()
@@ -31,6 +29,7 @@ class EarningsAgent:
         self.smtp_user = os.getenv('SMTP_USER')
         self.smtp_pass = os.getenv('SMTP_PASS')
         self.email_to = os.getenv('EMAIL_TO')
+        self.model = os.getenv('OPENAI_MODEL')
         
         # Initialize OpenAI client
         if self.openai_key:
@@ -194,7 +193,6 @@ Format: TICKER: [3-4 sophisticated insights with guidance analysis]
             context_line = f"""{ticker}: 
 EPS: {format_number(earnings.get('epsEstimate'))}→{format_number(earnings.get('epsActual'))} 
 Revenue: {format_number(earnings.get('revenueEstimate'))}→{format_number(earnings.get('revenueActual'))}
-Period: {earnings.get('period', 'Unknown')}
 Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insights else 'Limited guidance available'}
 
 """
@@ -208,7 +206,7 @@ Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insight
             return "AI insights disabled - set OPENAI_API_KEY to enable"
         
         # Check cache first
-        cache_key = f"{ticker}_{earnings_data.get('period', 'Unknown')}_{earnings_data.get('epsActual', 'N/A')}"
+        cache_key = f"{ticker}_{earnings_data.get('epsActual', 'N/A')}"
         if cache_key in self.insights_cache:
             print(f"✓ Using cached insights for {ticker}")
             return self.insights_cache[cache_key]
@@ -226,31 +224,23 @@ Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insight
                 except (ValueError, TypeError):
                     return str(value)
             
-            # Enhanced context with guidance focus
-            context = f"""Analyze {ticker} earnings results with sophisticated insights:
+            # Build optimized context for single ticker
+            context = f"""
+Analyze earnings results for {ticker}:
 
-FINANCIAL RESULTS:
-- Period: {earnings_data.get('period', 'Unknown')}
-- EPS: Est {format_number(earnings_data.get('epsEstimate'))} vs Actual {format_number(earnings_data.get('epsActual'))}
-- Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {format_number(earnings_data.get('revenueActual'))}
+EPS: Est {format_number(earnings_data.get('epsEstimate'))} vs Actual {format_number(earnings_data.get('epsActual'))}
+Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {format_number(earnings_data.get('revenueActual'))}
 
-GUIDANCE & STRATEGIC CONTEXT:
-{chr(10).join([f"- {item.get('headline', 'N/A')}" for item in news_data[:3]])}
+News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
 
-REQUIRED INSIGHTS (3-4 bullet points):
-1. GUIDANCE ANALYSIS: Extract forward-looking statements and strategic initiatives
-2. STRATEGIC IMPLICATIONS: What the results mean for future growth and market position
-3. RISK ASSESSMENT: Identify challenges and management's response
-4. INVESTMENT THESIS: Why this matters beyond obvious beats/misses
-
-AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights and guidance implications.
+Provide 2-3 key insights in bullet points.
 """
             
             print(f"🤖 Generating enhanced AI insights for {ticker}...")
             
             # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -286,7 +276,7 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
             
             # Use OpenAI SDK for batch processing
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. For each company, provide 3-4 sophisticated insights that focus on guidance analysis, strategic implications, risk factors, and investment thesis. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -414,9 +404,8 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
         
         eps_est = format_number(earnings_data.get('epsEstimate'))
         eps_act = format_number(earnings_data.get('epsActual'))
-        rev_est = format_number(earnings_data.get('revenueEstimate'))
-        rev_act = format_number(earnings_data.get('revenueActual'))
-        period = earnings_data.get('period', 'Unknown')
+        rev_est = format_number(earnings_data.get('revenueEstimate') / 1000000)
+        rev_act = format_number(earnings_data.get('revenueActual') / 1000000)
         
         # Calculate beats/misses
         try:
@@ -428,7 +417,7 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
         html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2 style="color: #2c3e50;">{ticker} Earnings Report - {period}</h2>
+            <h2 style="color: #2c3e50;">{ticker} Earnings Report</h2>
             
             <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
                 <h3 style="margin-top: 0;">Financial Results</h3>
@@ -441,8 +430,8 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
                     </tr>
                     <tr>
                         <td style="padding: 8px;"><strong>Revenue:</strong></td>
-                        <td style="padding: 8px;">Estimate: {rev_est}</td>
-                        <td style="padding: 8px;">Actual: {rev_act}</td>
+                        <td style="padding: 8px;">Estimate: {rev_est}M</td>
+                        <td style="padding: 8px;">Actual: {rev_act}M</td>
                         <td style="padding: 8px; color: {'green' if 'Beat' in rev_beat else 'red' if 'Miss' in eps_beat else 'gray'};">{rev_beat}</td>
                     </tr>
                 </table>
@@ -574,7 +563,7 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
             print(f"\n--- Sending email for {ticker} ---")
             
             # Create and send email
-            subject = f"{ticker} Earnings Report - {data['earnings'].get('period', 'Unknown')}"
+            subject = f"{ticker} Earnings Report"
             html_content = self.create_email_content(ticker, data['earnings'], data['news'], ai_insights.get(ticker, 'No insights available'))
             
             if self.send_email(subject, html_content):
@@ -586,12 +575,10 @@ AVOID: Stating the obvious (e.g., "EPS increased"). Focus on strategic insights 
 def main():
     """Main entry point"""
     import sys
-    
-    test_mode = True
-    
+
     try:
         agent = EarningsAgent()
-        agent.run(test_mode=test_mode)
+        agent.run(test_mode=os.getenv('TEST_MODE') == 'true')
     except Exception as e:
         print(f"❌ Fatal error: {e}")
         sys.exit(1)
