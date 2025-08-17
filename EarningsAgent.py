@@ -241,7 +241,7 @@ Provide 2-3 key insights in bullet points.
             
             # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -277,7 +277,7 @@ Provide 2-3 key insights in bullet points.
             
             # Use OpenAI SDK for batch processing
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. For each company, provide 3-4 sophisticated insights that focus on guidance analysis, strategic implications, risk factors, and investment thesis. Avoid obvious statements and focus on sophisticated analysis."},
                     {"role": "user", "content": context}
@@ -405,8 +405,8 @@ Provide 2-3 key insights in bullet points.
         
         eps_est = format_number(earnings_data.get('epsEstimate'))
         eps_act = format_number(earnings_data.get('epsActual'))
-        rev_est = format_number(earnings_data.get('revenueEstimate'))
-        rev_act = format_number(earnings_data.get('revenueActual'))
+        rev_est = format_number(earnings_data.get('revenueEstimate') / 1000000)
+        rev_act = format_number(earnings_data.get('revenueActual') / 1000000)
         
         # Calculate beats/misses
         try:
