@@ -4,7 +4,7 @@ Smart Earnings Agent - Intelligent Stock Earnings Monitor with AI Insights
 - Automatically fetches earnings data for stocks in watchlist.csv
 - Uses AI to generate comprehensive summaries and insights
 - Sends detailed email reports for each earnings announcement
-- Smart API batching and rate limiting with OpenAI best practices
+- Smart API batching and rate limiting with OpenAI SDK
 - Built-in error handling and reliability
 """
 
@@ -20,6 +20,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Dict, Any
 from dotenv import load_dotenv
+from openai import OpenAI
 load_dotenv()
 
 class EarningsAgent:
@@ -31,8 +32,16 @@ class EarningsAgent:
         self.smtp_pass = os.getenv('SMTP_PASS')
         self.email_to = os.getenv('EMAIL_TO')
         
+        # Initialize OpenAI client
+        if self.openai_key:
+            self.openai_client = OpenAI(api_key=self.openai_key)
+            print("✅ OpenAI SDK client initialized")
+        else:
+            self.openai_client = None
+            print("⚠️ OpenAI API key not set - AI insights will be disabled")
+        
         # Enhanced OpenAI rate limiting with best practices
-        self.openai_calls_per_minute = 1  # Very conservative - 1 call per minute
+        self.openai_calls_per_minute = 3  # Increased since using SDK
         self.last_openai_call = 0
         self.openai_call_times = []
         
@@ -42,11 +51,6 @@ class EarningsAgent:
         
         # Caching to avoid duplicate API calls
         self.insights_cache = {}
-        
-        # Rate limit tracking from headers
-        self.rate_limit_requests = None
-        self.rate_limit_tokens = None
-        self.rate_limit_reset = None
         
         # Validate required config
         if not all([self.finnhub_key, self.smtp_user, self.smtp_pass, self.email_to]):
@@ -130,20 +134,8 @@ class EarningsAgent:
             print(f"✗ Failed to get news for {ticker}: {e}")
             return []
     
-    def update_rate_limits_from_headers(self, response):
-        """Extract rate limit information from OpenAI response headers"""
-        try:
-            self.rate_limit_requests = response.headers.get('x-ratelimit-limit-requests')
-            self.rate_limit_tokens = response.headers.get('x-ratelimit-limit-tokens')
-            self.rate_limit_reset = response.headers.get('x-ratelimit-reset-requests')
-            
-            if self.rate_limit_requests:
-                print(f"�� Rate limits: {self.rate_limit_requests} req/min, {self.rate_limit_tokens} tokens/min")
-        except Exception as e:
-            print(f"⚠️ Could not parse rate limit headers: {e}")
-    
     def wait_for_openai_rate_limit(self):
-        """Enhanced rate limiting with header-based information"""
+        """Enhanced rate limiting with SDK best practices"""
         now = time.time()
         
         # Remove calls older than 1 minute
@@ -151,13 +143,13 @@ class EarningsAgent:
         
         # If we've made too many calls recently, wait
         if len(self.openai_call_times) >= self.openai_calls_per_minute:
-            wait_time = 60 - (now - self.openai_call_times[0]) + random.uniform(5, 10)
+            wait_time = 60 - (now - self.openai_call_times[0]) + random.uniform(2, 5)
             print(f"⏳ OpenAI rate limit reached. Waiting {wait_time:.1f}s...")
             time.sleep(wait_time)
             now = time.time()
         
         # Add jitter to prevent thundering herd
-        jitter = random.uniform(2.0, 5.0)
+        jitter = random.uniform(1.0, 3.0)
         time.sleep(jitter)
         
         self.openai_call_times.append(now)
@@ -186,8 +178,8 @@ class EarningsAgent:
         return optimized_context
     
     def generate_ai_insights_single(self, ticker, earnings_data, news_data):
-        """Generate AI insights for a single ticker - fallback method"""
-        if not self.openai_key:
+        """Generate AI insights for a single ticker using OpenAI SDK"""
+        if not self.openai_client:
             return "AI insights disabled - set OPENAI_API_KEY to enable"
         
         # Check cache first
@@ -213,41 +205,19 @@ News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
 Provide 2-3 key insights in bullet points.
 """
             
-            headers = {
-                'Authorization': f'Bearer {self.openai_key}',
-                'Content-Type': 'application/json'
-            }
+            print(f"🤖 Generating AI insights for {ticker}...")
             
-            payload = {
-                'model': 'gpt-5-nano',
-                'messages': [
-                    {'role': 'system', 'content': 'You are a financial analyst. Provide concise, actionable insights.'},
-                    {'role': 'user', 'content': context}
+            # Use OpenAI SDK instead of direct HTTP requests
+            response = self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst. Provide concise, actionable insights."},
+                    {"role": "user", "content": context}
                 ],
-                'max_tokens': self.max_tokens_per_request,
-                'temperature': 0.3
-            }
-            
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers=headers,
-                json=payload,
-                timeout=60
+                max_tokens=self.max_tokens_per_request
             )
             
-            # Update rate limit information
-            self.update_rate_limits_from_headers(response)
-            
-            if response.status_code == 429:
-                retry_after = response.headers.get('Retry-After', 60)
-                print(f"⏳ Rate limited for {ticker}, waiting {retry_after}s (Retry-After header)...")
-                time.sleep(int(retry_after))
-                return f"AI insights temporarily unavailable for {ticker} due to rate limiting"
-            
-            response.raise_for_status()
-            
-            data = response.json()
-            content = data['choices'][0]['message']['content']
+            content = response.choices[0].message.content
             
             # Cache the result
             self.insights_cache[cache_key] = content
@@ -260,8 +230,8 @@ Provide 2-3 key insights in bullet points.
             return f"AI insights unavailable: {str(e)}"
     
     def generate_batched_ai_insights(self, tickers_data):
-        """Generate AI insights for multiple tickers in one API call with token optimization"""
-        if not self.openai_key:
+        """Generate AI insights for multiple tickers in one API call using OpenAI SDK"""
+        if not self.openai_client:
             return {ticker: "AI insights disabled - set OPENAI_API_KEY to enable" for ticker in tickers_data.keys()}
         
         try:
@@ -271,78 +241,79 @@ Provide 2-3 key insights in bullet points.
             # Optimize context to stay within token limits
             context = self.optimize_context_for_tokens(tickers_data)
             
-            headers = {
-                'Authorization': f'Bearer {self.openai_key}',
-                'Content-Type': 'application/json'
-            }
+            print(f"🤖 Generating batched AI insights for {len(tickers_data)} tickers...")
             
-            payload = {
-                'model': 'gpt-4o-mini',
-                'messages': [
-                    {'role': 'system', 'content': 'You are a financial analyst. Provide concise, actionable insights for each company.'},
-                    {'role': 'user', 'content': context}
+            # Use OpenAI SDK for batch processing
+            response = self.openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst. Provide concise, actionable insights for each company."},
+                    {"role": "user", "content": context}
                 ],
-                'max_tokens': self.max_tokens_per_request * len(tickers_data),  # Scale tokens with ticker count
-                'temperature': 0.3
-            }
-            
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                headers=headers,
-                json=payload,
-                timeout=60
+                max_tokens=self.max_tokens_per_request * len(tickers_data)  # Scale tokens with ticker count
             )
             
-            # Update rate limit information
-            self.update_rate_limits_from_headers(response)
-            
-            if response.status_code == 429:
-                retry_after = response.headers.get('Retry-After', 60)
-                print(f"⏳ Batch API call rate limited, waiting {retry_after}s (Retry-After header)...")
-                time.sleep(int(retry_after))
-                print("🔄 Falling back to individual API calls...")
-                return self.generate_individual_insights(tickers_data)
-            
-            response.raise_for_status()
-            
-            data = response.json()
-            content = data['choices'][0]['message']['content']
+            content = response.choices[0].message.content
             
             print(f"✓ Generated AI insights for {len(tickers_data)} tickers in one API call")
+            
+            # Debug: Show the raw AI response
+            print(f"🔍 Raw AI response: {content}")
+            print(f"🔍 Response length: {len(content)} characters")
             
             # Parse the response to extract insights for each ticker
             insights = {}
             current_ticker = None
             current_insights = []
             
-            for line in content.split('\n'):
+            # More robust parsing - try multiple approaches
+            lines = content.split('\n')
+            print(f"🔍 Parsing {len(lines)} lines from AI response")
+            
+            for i, line in enumerate(lines):
                 line = line.strip()
                 if not line:
                     continue
                 
+                print(f"🔍 Line {i+1}: '{line}'")
+                
                 # Check if this line starts with a ticker symbol
-                if any(ticker in line.upper() for ticker in tickers_data.keys()):
+                ticker_found = None
+                for ticker in tickers_data.keys():
+                    if line.upper().startswith(ticker.upper()):
+                        ticker_found = ticker
+                        break
+                
+                if ticker_found:
                     # Save previous ticker's insights
                     if current_ticker:
                         insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
+                        print(f"✅ Saved insights for {current_ticker}: {len(current_insights)} items")
                     
                     # Start new ticker
-                    current_ticker = line.split(':')[0].strip().upper()
+                    current_ticker = ticker_found
                     current_insights = []
-                elif current_ticker and line.startswith('-'):
+                    print(f"🔄 Starting new ticker: {current_ticker}")
+                elif current_ticker and (line.startswith('-') or line.startswith('•') or line.startswith('*')):
                     current_insights.append(line)
+                    print(f"📝 Added insight: {line}")
                 elif current_ticker and line:
+                    # If line doesn't start with bullet but has content, treat as insight
                     current_insights.append(f"• {line}")
+                    print(f"📝 Added insight (with bullet): • {line}")
             
             # Save last ticker's insights
             if current_ticker:
                 insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
+                print(f"✅ Saved insights for {current_ticker}: {len(current_insights)} items")
             
             # Fill in any missing tickers
             for ticker in tickers_data.keys():
                 if ticker not in insights:
                     insights[ticker] = "AI insights unavailable"
+                    print(f"⚠️ No insights found for {ticker}, setting to unavailable")
             
+            print(f"🔍 Final insights: {insights}")
             return insights
             
         except Exception as e:
@@ -540,7 +511,7 @@ Provide 2-3 key insights in bullet points.
                 emails_sent += 1
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
-        print(f"�� Rate limit info: {self.rate_limit_requests} req/min, {self.rate_limit_tokens} tokens/min")
+        print("✅ AI insights generated successfully using OpenAI SDK")
 
 def main():
     """Main entry point"""
