@@ -15,9 +15,8 @@ SMTP_USER=your@gmail.com
 SMTP_PASS=your_app_password
 EMAIL_TO=your@gmail.com
 WATCHLIST_CSV=./watchlist.csv
-# Optional LLM:
-# OPENAI_API_KEY=sk-...
-# OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
 """
 
 import csv
