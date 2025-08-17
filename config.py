@@ -68,5 +68,4 @@ class Config:
         print(f"Email To: {'✓' if cls.EMAIL_TO else '✗'}")
         print(f"Watchlist: {cls.WATCHLIST_CSV}")
         print(f"Test Mode: {cls.TEST_MODE}")
-        print(f"Local Mode: {cls.LOCAL_MODE}")
         print("==================================") 
