@@ -36,7 +36,7 @@ class Config:
     TEST_MODE: bool = os.getenv("TEST_MODE", "false").lower() == "true"
     
     # API Rate Limiting
-    API_DELAY_SECONDS: float = float(os.getenv("API_DELAY_SECONDS", "1.0"))
+    API_DELAY_SECONDS: float = float(os.getenv("API_DELAY_SECONDS", "2.0"))
     
     # Content Limits
     MAX_PRESS_TEXT_LENGTH: int = int(os.getenv("MAX_PRESS_TEXT_LENGTH", "8000"))

@@ -155,13 +155,56 @@ class EarningsProcessor:
             return ""
         
         try:
-            async with self.session.get(url, headers={"Accept-Language": "en-US,en;q=0.9"}) as response:
+            # Skip problematic URLs that are likely to fail
+            if any(skip_domain in url.lower() for skip_domain in [
+                'wsj.com', 'bloomberg.com', 'reuters.com', 'cnbc.com', 'marketwatch.com'
+            ]):
+                print(f"[INFO] Skipping {url} - known to block scraping")
+                return ""
+            
+            # Set reasonable headers to avoid header length issues
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            }
+            
+            async with self.session.get(url, headers=headers, timeout=15) as response:
+                if response.status == 403:
+                    print(f"[INFO] Access forbidden for {url} - site blocks scraping")
+                    return ""
+                elif response.status == 429:
+                    print(f"[INFO] Rate limited for {url} - too many requests")
+                    return ""
+                elif response.status >= 400:
+                    print(f"[WARN] HTTP {response.status} for {url}")
+                    return ""
+                
                 response.raise_for_status()
+                
+                # Check content type
+                content_type = response.headers.get('content-type', '').lower()
+                if 'text/html' not in content_type:
+                    print(f"[INFO] Non-HTML content for {url}: {content_type}")
+                    return ""
+                
                 html_content = await response.text()
                 return self.extract_main_text(html_content)
                 
+        except asyncio.TimeoutError:
+            print(f"[WARN] Timeout fetching {url}")
+            return ""
         except Exception as e:
-            print(f"[WARN] Failed to fetch press release from {url}: {e}")
+            # Don't print the full error for header length issues
+            if "Header value is too long" in str(e):
+                print(f"[INFO] Header too long for {url} - skipping")
+            elif "HTTP Forbidden" in str(e):
+                print(f"[INFO] Access forbidden for {url}")
+            else:
+                print(f"[WARN] Failed to fetch press release from {url}: {e}")
             return ""
     
     def extract_main_text(self, html_text: str) -> str:
@@ -257,22 +300,29 @@ class EarningsProcessor:
         if not self.config.OPENAI_API_KEY:
             return "<p style='color:#777'>(AI summary disabled — set OPENAI_API_KEY to enable.)</p>"
         
-        try:
-            # Build context for AI
-            context = self.build_ai_context(ticker, earnings_data, guidance_lines, news, press_texts)
-            
-            # Prepare OpenAI request
-            headers = {
-                "Authorization": f"Bearer {self.config.OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": self.config.OPENAI_MODEL,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": """You are an expert equity research analyst. Create a concise, data-driven summary (5-8 bullet points) of quarterly earnings results. Focus on:
+        # Add delay to prevent rate limiting
+        await asyncio.sleep(1.0)
+        
+        max_retries = 3
+        base_delay = 2.0
+        
+        for attempt in range(max_retries):
+            try:
+                # Build context for AI
+                context = self.build_ai_context(ticker, earnings_data, guidance_lines, news, press_texts)
+                
+                # Prepare OpenAI request
+                headers = {
+                    "Authorization": f"Bearer {self.config.OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                payload = {
+                    "model": self.config.OPENAI_MODEL,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": """You are an expert equity research analyst. Create a concise, data-driven summary (5-8 bullet points) of quarterly earnings results. Focus on:
 1) EPS and revenue performance vs estimates (beat/miss magnitude)
 2) Year-over-year and sequential growth rates
 3) Forward guidance and outlook changes
@@ -283,39 +333,57 @@ class EarningsProcessor:
 8) Investment implications
 
 Use specific numbers and percentages. Be concise and actionable."""
-                    },
-                    {
-                        "role": "user",
-                        "content": context
-                    }
-                ],
-                "temperature": self.config.OPENAI_TEMPERATURE,
-                "max_tokens": 500
-            }
-            
-            # Make API call
-            async with self.session.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=headers,
-                json=payload
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
+                        },
+                        {
+                            "role": "user",
+                            "content": context
+                        }
+                    ],
+                    "temperature": self.config.OPENAI_TEMPERATURE,
+                    "max_tokens": 500
+                }
                 
-                content = data["choices"][0]["message"]["content"]
-                if not content:
-                    raise ValueError("Empty response from OpenAI")
-                
-                # Convert markdown bullets to HTML
-                bullet_lines = [line.strip("-• ").strip() for line in content.splitlines() if line.strip()]
-                summary_html = "<ul>" + "".join(f"<li>{html.escape(line)}</li>" for line in bullet_lines) + "</ul>"
-                
-                print(f"[INFO] Generated AI summary for {ticker} with {len(bullet_lines)} bullet points")
-                return summary_html
-                
-        except Exception as e:
-            print(f"[WARN] AI summary failed for {ticker}: {e}")
-            return f"<p style='color:#777'>(AI summary unavailable: {html.escape(str(e))})</p>"
+                # Make API call
+                async with self.session.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                ) as response:
+                    if response.status == 429:
+                        # Rate limited - wait and retry
+                        delay = base_delay * (2 ** attempt)
+                        print(f"[INFO] OpenAI rate limited for {ticker}, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                        await asyncio.sleep(delay)
+                        continue
+                    
+                    response.raise_for_status()
+                    data = await response.json()
+                    
+                    content = data["choices"][0]["message"]["content"]
+                    if not content:
+                        raise ValueError("Empty response from OpenAI")
+                    
+                    # Convert markdown bullets to HTML
+                    bullet_lines = [line.strip("-• ").strip() for line in content.splitlines() if line.strip()]
+                    summary_html = "<ul>" + "".join(f"<li>{html.escape(line)}</li>" for line in bullet_lines) + "</ul>"
+                    
+                    print(f"[INFO] Generated AI summary for {ticker} with {len(bullet_lines)} bullet points")
+                    return summary_html
+                    
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    # Rate limited - wait and retry
+                    delay = base_delay * (2 ** attempt)
+                    print(f"[INFO] OpenAI rate limited for {ticker}, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    print(f"[WARN] AI summary failed for {ticker}: {e}")
+                    return f"<p style='color:#777'>(AI summary unavailable: {html.escape(str(e))})</p>"
+        
+        # If we get here, all retries failed
+        print(f"[WARN] AI summary failed for {ticker} after {max_retries} attempts")
+        return f"<p style='color:#777'>(AI summary unavailable after multiple retries)</p>"
     
     def build_ai_context(self, ticker: str, earnings_data: Dict[str, Any], 
                          guidance_lines: List[str], news: List[Dict[str, Any]], 
@@ -541,6 +609,12 @@ Use specific numbers and percentages. Be concise and actionable."""
         # Load tickers
         try:
             tickers = self.load_tickers()
+            
+            # In test mode, limit to first 3 tickers to avoid overwhelming APIs
+            if self.config.TEST_MODE and len(tickers) > 3:
+                tickers = tickers[:3]
+                print(f"[INFO] Test mode: limiting to first 3 tickers: {', '.join(tickers)}")
+                
         except Exception as e:
             print(f"[ERROR] Failed to load tickers: {e}")
             return
@@ -552,12 +626,18 @@ Use specific numbers and percentages. Be concise and actionable."""
         for i, ticker in enumerate(tickers, 1):
             print(f"[INFO] Processing {ticker} ({i}/{total_count})")
             
-            if await self.process_ticker(ticker, date_str):
-                success_count += 1
+            try:
+                if await self.process_ticker(ticker, date_str):
+                    success_count += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to process {ticker}: {e}")
+                continue
             
-            # Rate limiting
+            # Rate limiting between tickers - longer delay to prevent API overload
             if i < total_count:
-                await asyncio.sleep(self.config.API_DELAY_SECONDS)
+                delay = self.config.API_DELAY_SECONDS * 2  # Double the delay
+                print(f"[INFO] Waiting {delay}s before next ticker...")
+                await asyncio.sleep(delay)
         
         # Summary
         if success_count > 0:
