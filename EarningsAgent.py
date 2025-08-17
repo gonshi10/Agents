@@ -31,10 +31,13 @@ from typing import List, Optional, Tuple
 import requests
 from zoneinfo import ZoneInfo
 
+# ----- DEBUG Vars -----
 LOCAL = False
 if LOCAL:
     from dotenv import load_dotenv
     load_dotenv()
+TEST = True
+# ----------------------
 
 FINNHUB_BASE = "https://finnhub.io/api/v1"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
@@ -283,7 +286,7 @@ def fmt_num(x) -> str:
 def main():
     # Only act during 00:xx in New York
     now_et = datetime.now(ZoneInfo("America/New_York"))
-    if now_et.hour != 0 and False:
+    if now_et.hour != 0 and not TEST:
         print(f"[INFO] Not midnight ET (now_et={now_et}); exiting.")
         return
 
