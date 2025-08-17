@@ -47,7 +47,6 @@ def test_ai_insights():
         # Test with actual earnings data
         print("\n🧪 Testing with mock earnings data...")
         test_earnings_data = {
-            'period': 'Q1 2024',
             'epsEstimate': '1.50',
             'epsActual': '1.75',
             'revenueEstimate': '1000000000',
@@ -63,7 +62,6 @@ def test_ai_insights():
         context = f"""
 Analyze earnings results for AAPL:
 
-Period: {test_earnings_data.get('period', 'Unknown')}
 EPS: Est {test_earnings_data.get('epsEstimate', 'N/A')} vs Actual {test_earnings_data.get('epsActual', 'N/A')}
 Revenue: Est {test_earnings_data.get('revenueEstimate', 'N/A')} vs Actual {test_earnings_data.get('revenueActual', 'N/A')}
 
