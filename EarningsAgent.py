@@ -219,7 +219,7 @@ Provide 2-3 key insights in bullet points.
             }
             
             payload = {
-                'model': 'gpt-4o-mini',
+                'model': 'gpt-5-nano',
                 'messages': [
                     {'role': 'system', 'content': 'You are a financial analyst. Provide concise, actionable insights.'},
                     {'role': 'user', 'content': context}
