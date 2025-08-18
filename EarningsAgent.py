@@ -426,12 +426,12 @@ Provide 2-3 key insights in bullet points.
             rev_act_valid = earnings_data.get('revenueActual') and earnings_data.get('revenueActual') != 'N/A'
             
             if eps_est_valid and eps_act_valid:
-                eps_beat = "✓ HIT" if float(earnings_data.get('epsActual')) > float(earnings_data.get('epsEstimate')) else "✗ MISS"
+                eps_beat = "✓ BEAT" if float(earnings_data.get('epsActual')) > float(earnings_data.get('epsEstimate')) else "✗ MISS"
             else:
                 eps_beat = "—"
                 
             if rev_est_valid and rev_act_valid:
-                rev_beat = "✓ HIT" if float(earnings_data.get('revenueActual')) > float(earnings_data.get('revenueEstimate')) else "✗ MISS"
+                rev_beat = "✓ BEAT" if float(earnings_data.get('revenueActual')) > float(earnings_data.get('revenueEstimate')) else "✗ MISS"
             else:
                 rev_beat = "—"
              
@@ -534,7 +534,7 @@ Provide 2-3 key insights in bullet points.
                     background: linear-gradient(to right, #28a745, #6c757d, #dc3545);
                     transition: width 0.3s ease-in-out;
                 }}
-                .progress-fill.hit {{
+                .progress-fill.beat {{
                     background: linear-gradient(to right, #28a745, #20c997);
                 }}
                 .progress-fill.miss {{
@@ -553,7 +553,7 @@ Provide 2-3 key insights in bullet points.
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
                 }}
-                .progress-label.hit {{
+                .progress-label.beat {{
                     background: #d4edda;
                     color: #155724;
                     border: 1px solid #c3e6cb;
@@ -614,7 +614,7 @@ Provide 2-3 key insights in bullet points.
                     margin-top: 10px;
                     margin-bottom: 10px;
                 }}
-                .performance-status.hit {{
+                .performance-status.beat {{
                     background: #d4edda;
                     color: #155724;
                     border: 2px solid #c3e6cb;
@@ -650,13 +650,13 @@ Provide 2-3 key insights in bullet points.
                         <div class="metric-values">
                             <div class="actual-value">{eps_act}</div>
                             <div class="estimate-value">Est: {eps_est}</div>
-                            <div class="performance-status {'hit' if 'HIT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}">
+                            <div class="performance-status {'beat' if 'BEAT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}">
                                 {eps_beat.replace('✓ ', '').replace('✗ ', '') if eps_beat != '—' else '—'}
                             </div>
                         </div>
                         <div class="progress-container">
                             <div class="progress-bar">
-                                <div class="progress-fill {'hit' if 'HIT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}" style="width: {'85%' if 'HIT' in eps_beat else '65%' if 'MISS' in eps_beat else '50%'}"></div>
+                                <div class="progress-fill {'beat' if 'BEAT' in eps_beat else 'miss' if 'MISS' in eps_beat else 'neutral'}" style="width: {'85%' if 'BEAT' in eps_beat else '65%' if 'MISS' in eps_beat else '50%'}"></div>
                             </div>
                         </div>
                     </div>
@@ -670,13 +670,13 @@ Provide 2-3 key insights in bullet points.
                         <div class="metric-values">
                             <div class="actual-value">{rev_act}</div>
                             <div class="estimate-value">Est: {rev_est}</div>
-                            <div class="performance-status {'hit' if 'HIT' in rev_beat else 'miss' if 'MISS' in rev_beat else 'neutral'}">
+                            <div class="performance-status {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else 'neutral'}">
                                 {rev_beat.replace('✓ ', '').replace('✗ ', '') if rev_beat != '—' else '—'}
                             </div>
                         </div>
                         <div class="progress-container">
                             <div class="progress-bar">
-                                <div class="progress-fill {'hit' if 'HIT' in rev_beat else 'miss' if 'MISS' in rev_beat else '50%'}"></div>
+                                <div class="progress-fill {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else '50%'}"></div>
                             </div>
                         </div>
                     </div>
