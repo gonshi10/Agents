@@ -4,7 +4,7 @@ Smart Earnings Agent - Intelligent Stock Earnings Monitor with AI Insights
 - Automatically fetches earnings data for stocks in watchlist.csv
 - Uses AI to generate comprehensive summaries and insights
 - Sends detailed email reports for each earnings announcement
-- Smart API batching and rate limiting with OpenAI SDK
+- Simple rate limiting with delays between API calls
 - Built-in error handling and reliability
 """
 
@@ -39,9 +39,16 @@ class EarningsAgent:
             self.openai_client = None
             print("⚠️ OpenAI API key not set - AI insights will be disabled")
         
-        # Enhanced OpenAI rate limiting with best practices
-        self.openai_calls_per_minute = 3  # Increased since using SDK
-        self.last_openai_call = 0
+        # Simple delay between Finnhub API calls (60 calls/minute = 1 call per second)
+        self.finnhub_delay = 2.0  # 2 seconds between calls to stay well under limit
+        
+        # Rate limiting: wait a minute after 50 calls
+        self.finnhub_call_count = 0
+        self.last_reset_time = time.time()
+        self.max_calls_before_wait = 50
+        
+        # OpenAI rate limiting
+        self.openai_calls_per_minute = 3
         self.openai_call_times = []
         
         # Token management to stay within TPM limits
@@ -56,6 +63,44 @@ class EarningsAgent:
             raise ValueError("Missing required environment variables. Check FINNHUB_API_KEY, SMTP_USER, SMTP_PASS, EMAIL_TO")
         
         print("✓ Configuration loaded successfully")
+        print(f"📊 Finnhub rate limiting: {self.max_calls_before_wait} calls per minute with automatic waits")
+    
+    def check_rate_limit(self):
+        """Check if we need to wait due to rate limiting"""
+        current_time = time.time()
+        
+        # Reset counter if a minute has passed
+        if current_time - self.last_reset_time >= 60:
+            self.finnhub_call_count = 0
+            self.last_reset_time = current_time
+        
+        # If we've made 50 calls, wait until the minute is up
+        if self.finnhub_call_count >= self.max_calls_before_wait:
+            wait_time = 60 - (current_time - self.last_reset_time) + 1  # Add 1 second buffer
+            print(f"⏳ Rate limit reached (50 calls). Waiting {wait_time:.1f} seconds...")
+            time.sleep(wait_time)
+            self.finnhub_call_count = 0
+            self.last_reset_time = time.time()
+            print("✅ Rate limit reset, continuing...")
+        
+        # Increment call counter
+        self.finnhub_call_count += 1
+    
+    def wait_for_openai_rate_limit(self):
+        """Simple OpenAI rate limiting"""
+        now = time.time()
+        
+        # Remove calls older than 1 minute
+        self.openai_call_times = [t for t in self.openai_call_times if now - t < 60]
+        
+        # If we've made too many calls recently, wait
+        if len(self.openai_call_times) >= self.openai_calls_per_minute:
+            wait_time = 60 - (now - self.openai_call_times[0]) + 2
+            print(f"⏳ OpenAI rate limit reached. Waiting {wait_time:.1f}s...")
+            time.sleep(wait_time)
+            now = time.time()
+        
+        self.openai_call_times.append(now)
     
     def load_tickers(self, csv_file='watchlist.csv'):
         """Load ticker symbols from CSV"""
@@ -77,6 +122,9 @@ class EarningsAgent:
     def get_earnings_data(self, ticker, date_str):
         """Get earnings data for a ticker on a specific date"""
         try:
+            # Check rate limit before making API call
+            self.check_rate_limit()
+            
             url = "https://finnhub.io/api/v1/calendar/earnings"
             params = {
                 'token': self.finnhub_key,
@@ -105,6 +153,9 @@ class EarningsAgent:
     def get_company_news(self, ticker, date_str):
         """Get company news for a ticker on a specific date"""
         try:
+            # Check rate limit before making API call
+            self.check_rate_limit()
+            
             url = "https://finnhub.io/api/v1/company-news"
             params = {
                 'token': self.finnhub_key,
@@ -137,27 +188,6 @@ class EarningsAgent:
         except Exception as e:
             print(f"✗ Failed to get news for {ticker}: {e}")
             return []
-    
-    def wait_for_openai_rate_limit(self):
-        """Enhanced rate limiting with SDK best practices"""
-        now = time.time()
-        
-        # Remove calls older than 1 minute
-        self.openai_call_times = [t for t in self.openai_call_times if now - t < 60]
-        
-        # If we've made too many calls recently, wait
-        if len(self.openai_call_times) >= self.openai_calls_per_minute:
-            wait_time = 60 - (now - self.openai_call_times[0]) + random.uniform(2, 5)
-            print(f"⏳ OpenAI rate limit reached. Waiting {wait_time:.1f}s...")
-            time.sleep(wait_time)
-            now = time.time()
-        
-        # Add jitter to prevent thundering herd
-        jitter = random.uniform(1.0, 3.0)
-        time.sleep(jitter)
-        
-        self.openai_call_times.append(now)
-        self.last_openai_call = now
     
     def optimize_context_for_tokens(self, tickers_data):
         """Optimize context to stay within token limits with enhanced guidance analysis"""
@@ -775,8 +805,8 @@ Provide 2-3 key insights in bullet points.
             return False
     
     def run(self, test_mode=False):
-        """Main execution with smart batching and fallback"""
-        print("🚀 Starting Smart Earnings Agent with OpenAI Best Practices...")
+        """Main execution with simple rate limiting"""
+        print("🚀 Starting Smart Earnings Agent with Simple Rate Limiting...")
         
         # Determine date to check
         if test_mode:
@@ -792,39 +822,43 @@ Provide 2-3 key insights in bullet points.
             print("❌ No tickers loaded. Exiting.")
             return
         
-        # Collect all data first
+        print(f"📊 Processing {len(tickers)} tickers with simple delays...")
+        
+        # Collect all data with simple delays between API calls
         print("\n📊 Collecting earnings data and news...")
         tickers_data = {}
         
         for i, ticker in enumerate(tickers, 1):
-            print(f"\n--- Collecting data for {ticker} ({i}/{len(tickers)}) ---")
+            print(f"\n--- Processing {ticker} ({i}/{len(tickers)}) ---")
             
             # Get earnings data
             earnings = self.get_earnings_data(ticker, target_date)
             if not earnings:
+                print(f"ℹ No earnings found for {ticker}, skipping...")
                 continue
             
             # Get news
             news = self.get_company_news(ticker, target_date)
             
-            # Store data for batch processing
+            # Store data
             tickers_data[ticker] = {
                 'earnings': earnings,
                 'news': news
             }
             
-            # Rate limiting between API calls
-            if i < len(tickers):
-                time.sleep(1)
+            # Progress update
+            if i % 10 == 0:
+                print(f"📈 Progress: {i}/{len(tickers)} tickers processed ({i/len(tickers)*100:.1f}%)")
         
         if not tickers_data:
             print("❌ No earnings data found. Exiting.")
             return
         
-        print(f"\n🤖 Generating AI insights for {len(tickers_data)} tickers...")
-        print("💡 Using OpenAI best practices: token optimization, smart batching, and fallback strategies")
+        print(f"\n✅ Successfully collected data for {len(tickers_data)} tickers")
         
-        # Try batch processing first, fallback to individual if needed
+        print(f"\n🤖 Generating AI insights for {len(tickers_data)} tickers...")
+        
+        # Generate AI insights
         ai_insights = self.generate_batched_ai_insights(tickers_data)
         
         print(f"\n📧 Sending emails...")
@@ -843,7 +877,7 @@ Provide 2-3 key insights in bullet points.
                 emails_sent += 1
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
-        print("✅ AI insights generated successfully using OpenAI SDK")
+        print("✅ Simple rate limiting implemented successfully")
 
 def main():
     """Main entry point"""
