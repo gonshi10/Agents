@@ -52,8 +52,8 @@ class EarningsAgent:
         self.openai_call_times = []
         
         # Token management to stay within TPM limits
-        self.max_tokens_per_request = 300  # Conservative token limit
-        self.max_input_tokens = 2000  # Limit input size
+        self.max_tokens_per_request = 150  # Reduced from 300 for shorter insights
+        self.max_input_tokens = 1500  # Reduced from 2000 for more focused input
         
         # Caching to avoid duplicate API calls
         self.insights_cache = {}
@@ -256,23 +256,28 @@ Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insight
             
             # Build optimized context for single ticker
             context = f"""
-Analyze earnings results for {ticker}:
+Analyze {ticker} earnings:
 
 EPS: Est {format_number(earnings_data.get('epsEstimate'))} vs Actual {format_number(earnings_data.get('epsActual'))}
 Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {format_number(earnings_data.get('revenueActual'))}
 
-News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
+Key news: {', '.join([item.get('headline', 'N/A')[:40] for item in news_data[:1]])}
 
-Provide 2-3 key insights in bullet points.
+Provide 2 concise, actionable insights. Focus on:
+- Strategic implications
+- Forward-looking guidance
+- Key risks or opportunities
+
+Keep each insight under 15 words.
 """
             
-            print(f"🤖 Generating enhanced AI insights for {ticker}...")
+            print(f"🤖 Generating focused AI insights for {ticker}...")
             
             # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. Avoid obvious statements and focus on sophisticated analysis."},
+                    {"role": "system", "content": "You are a senior financial analyst. Provide 2 concise, actionable insights per company. Each insight must be under 15 words. Focus on strategic implications, guidance, and key risks/opportunities. Use bullet points."},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request
@@ -308,7 +313,7 @@ Provide 2-3 key insights in bullet points.
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, and investment theses. For each company, provide 3-4 sophisticated insights that focus on guidance analysis, strategic implications, risk factors, and investment thesis. Avoid obvious statements and focus on sophisticated analysis."},
+                    {"role": "system", "content": "You are a senior financial analyst. For each company, provide 2 concise, actionable insights. Each insight must be under 15 words. Focus on strategic implications, guidance, and key risks/opportunities. Use bullet points and format as 'TICKER: • Insight 1 • Insight 2'"},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request * len(tickers_data)  # Scale tokens with ticker count
@@ -468,6 +473,9 @@ Provide 2-3 key insights in bullet points.
         except (ValueError, TypeError) as e:
             eps_beat = rev_beat = "—"
         
+        # Pre-format the insights for HTML
+        formatted_insights = self.format_insights_for_html(ai_insights)
+        
         # Simple, clean HTML
         html_content = f"""
         <!DOCTYPE html>
@@ -478,10 +486,12 @@ Provide 2-3 key insights in bullet points.
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     line-height: 1.6;
                     color: #333;
-                    max-width: 600px;
+                    max-width: 800px;
+                    min-width: 600px;
                     margin: 0 auto;
                     padding: 20px;
                     background-color: #f9f9f9;
+                    box-sizing: border-box;
                 }}
                 .header {{
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -502,6 +512,9 @@ Provide 2-3 key insights in bullet points.
                     padding: 20px;
                     margin-bottom: 20px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    width: 100%;
+                    box-sizing: border-box;
+                    overflow: visible;
                 }}
                 /* New styles for dashboard grid */
                 .dashboard-grid {{
@@ -582,6 +595,8 @@ Provide 2-3 key insights in bullet points.
                     min-width: 80px;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
+                    margin-top: 10px;
+                    margin-bottom: 10px;
                 }}
                 .progress-label.beat {{
                     background: #d4edda;
@@ -603,13 +618,82 @@ Provide 2-3 key insights in bullet points.
                     border-left: 4px solid #ffc107;
                     padding: 20px;
                     border-radius: 4px;
-                    line-height: 1.8;
+                    line-height: 1.6;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    white-space: normal;
+                    max-width: 100%;
+                    box-sizing: border-box;
+                    min-height: 60px;
+                    display: block;
+                    overflow: visible;
+                    text-overflow: clip;
                 }}
                 .insights p {{
                     margin: 0 0 15px 0;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
                 }}
                 .insights p:last-child {{
                     margin-bottom: 0;
+                }}
+                .insight-item {{
+                    display: flex;
+                    align-items: flex-start;
+                    margin-bottom: 15px;
+                    padding: 12px 15px;
+                    background: rgba(255, 255, 255, 0.7);
+                    border-radius: 6px;
+                    border-left: 3px solid #ffc107;
+                    transition: all 0.2s ease;
+                }}
+                .insight-item:hover {{
+                    background: rgba(255, 255, 255, 0.9);
+                    transform: translateX(2px);
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                }}
+                .insight-bullet {{
+                    font-size: 1.3em;
+                    color: #ffc107;
+                    margin-right: 12px;
+                    font-weight: bold;
+                    min-width: 20px;
+                }}
+                .insight-number {{
+                    font-size: 1.3em;
+                    color: #ffc107;
+                    margin-right: 12px;
+                    font-weight: bold;
+                    min-width: 20px;
+                }}
+                .insight-text {{
+                    flex-grow: 1;
+                    font-size: 0.95em;
+                    color: #343a40;
+                    line-height: 1.5;
+                    font-weight: 500;
+                }}
+                .insights-container {{
+                    margin-top: 20px;
+                    padding-top: 15px;
+                    border-top: 1px solid #eee;
+                }}
+                .insights-header {{
+                    font-size: 1.2em;
+                    font-weight: 700;
+                    color: #495057;
+                    margin-bottom: 20px;
+                    padding: 10px 15px;
+                    border-bottom: 2px solid #ffc107;
+                    padding-bottom: 10px;
+                    background: rgba(255, 193, 7, 0.1);
+                    border-radius: 6px 6px 0 0;
+                }}
+                .no-insights {{
+                    font-style: italic;
+                    color: #6c757d;
+                    padding: 15px;
+                    text-align: center;
                 }}
                 .news-item {{
                     padding: 10px 0;
@@ -706,7 +790,7 @@ Provide 2-3 key insights in bullet points.
                         </div>
                         <div class="progress-container">
                             <div class="progress-bar">
-                                <div class="progress-fill {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else '50%'}"></div>
+                                <div class="progress-fill {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else 'neutral'}"></div>
                             </div>
                         </div>
                     </div>
@@ -716,7 +800,7 @@ Provide 2-3 key insights in bullet points.
             <div class="card">
                 <h3 style="margin-top: 0; color: #495057;">🧠 AI Insights</h3>
                 <div class="insights">
-                    {ai_insights.replace('**', '<strong>').replace('**', '</strong>').replace(chr(10), '</p><p>')}
+                    {formatted_insights}
                 </div>
             </div>
             
@@ -772,7 +856,7 @@ Provide 2-3 key insights in bullet points.
  
  🧠 AI INSIGHTS
  {'-' * 15}
- {ai_insights.replace('<br>', '\n').replace('<strong>', '').replace('</strong>', '')}
+ {ai_insights.replace('<br>', '\n').replace('<strong>', '').replace('</strong>', '').replace('•', '• ')}
  
  📰 RECENT NEWS
  {'-' * 15}
@@ -810,7 +894,7 @@ Provide 2-3 key insights in bullet points.
         
         # Determine date to check
         if test_mode:
-            target_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+            target_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
         else:
             target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
@@ -878,6 +962,48 @@ Provide 2-3 key insights in bullet points.
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
         print("✅ Simple rate limiting implemented successfully")
+
+    def format_insights_for_html(self, insights_text):
+        """Format AI insights with proper HTML structure and titles"""
+        if not insights_text or insights_text == "AI insights unavailable":
+            return '<div class="no-insights">No AI insights available</div>'
+        
+        # Split insights into lines and clean them up
+        lines = insights_text.strip().split('\n')
+        formatted_insights = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if this is a bullet point or numbered item
+            if line.startswith('•') or line.startswith('-') or line.startswith('*'):
+                # Extract the insight text
+                insight_text = line[1:].strip()
+                if insight_text:
+                    formatted_insights.append(f'<div class="insight-item"><span class="insight-bullet">•</span><span class="insight-text">{insight_text}</span></div>')
+            elif line.startswith('1.') or line.startswith('2.') or line.startswith('3.') or line.startswith('4.'):
+                # Handle numbered insights
+                parts = line.split('.', 1)
+                if len(parts) > 1:
+                    insight_text = parts[1].strip()
+                    if insight_text:
+                        formatted_insights.append(f'<div class="insight-item"><span class="insight-number">{parts[0]}.</span><span class="insight-text">{insight_text}</span></div>')
+            elif line and not line.startswith('TICKER:'):
+                # Treat as regular insight text
+                formatted_insights.append(f'<div class="insight-item"><span class="insight-bullet">•</span><span class="insight-text">{line}</span></div>')
+        
+        if not formatted_insights:
+            return '<div class="no-insights">No structured insights available</div>'
+        
+        # Create the formatted HTML
+        html_content = '<div class="insights-container">'
+        html_content += '<div class="insights-header">Key Strategic Insights</div>'
+        html_content += ''.join(formatted_insights)
+        html_content += '</div>'
+        
+        return html_content
 
 def main():
     """Main entry point"""
