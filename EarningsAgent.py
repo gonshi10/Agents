@@ -6,6 +6,7 @@ Smart Earnings Agent - Intelligent Stock Earnings Monitor with AI Insights
 - Sends detailed email reports for each earnings announcement
 - Simple rate limiting with delays between API calls
 - Built-in error handling and reliability
+- insights
 """
 
 import csv
