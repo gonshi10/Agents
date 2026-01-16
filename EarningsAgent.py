@@ -6,6 +6,7 @@ Smart Earnings Agent - Intelligent Stock Earnings Monitor with AI Insights
 - Sends detailed email reports for each earnings announcement
 - Simple rate limiting with delays between API calls
 - Built-in error handling and reliability
+- insights
 """
 
 import csv
@@ -52,11 +53,12 @@ class EarningsAgent:
         self.openai_call_times = []
         
         # Token management to stay within TPM limits
-        self.max_tokens_per_request = 150  # Reduced from 300 for shorter insights
-        self.max_input_tokens = 1500  # Reduced from 2000 for more focused input
+        self.max_tokens_per_request = 600  # Increased for richer insights
+        self.max_input_tokens = 2000  # Limit input size
         
         # Caching to avoid duplicate API calls
         self.insights_cache = {}
+        self.sector_cache = {}  # Cache for company sectors
         
         # Validate required config
         if not all([self.finnhub_key, self.smtp_user, self.smtp_pass, self.email_to]):
@@ -189,6 +191,119 @@ class EarningsAgent:
             print(f"✗ Failed to get news for {ticker}: {e}")
             return []
     
+    def get_company_sector(self, ticker):
+        """Get company sector/industry and map to expert type"""
+        # Check cache first
+        if ticker in self.sector_cache:
+            return self.sector_cache[ticker]
+        
+        try:
+            # Check rate limit before making API call
+            self.check_rate_limit()
+            
+            url = "https://finnhub.io/api/v1/stock/profile2"
+            params = {
+                'token': self.finnhub_key,
+                'symbol': ticker
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            sector = data.get('finnhubIndustry', '').upper() if data.get('finnhubIndustry') else ''
+            industry = data.get('finnhubIndustry', '').upper() if data.get('finnhubIndustry') else ''
+            
+            # Map sector/industry to expert type
+            expert_type = self.map_sector_to_expert(sector, industry, ticker)
+            
+            # Cache the result
+            self.sector_cache[ticker] = expert_type
+            
+            print(f"✓ Determined sector expert for {ticker}: {expert_type}")
+            return expert_type
+            
+        except Exception as e:
+            print(f"⚠️ Failed to get sector for {ticker}: {e}, using fallback")
+            # Fallback to ticker-based mapping
+            expert_type = self.map_sector_to_expert('', '', ticker)
+            self.sector_cache[ticker] = expert_type
+            return expert_type
+    
+    def map_sector_to_expert(self, sector, industry, ticker):
+        """Map sector/industry to expert type"""
+        sector_lower = sector.lower() if sector else ''
+        industry_lower = industry.lower() if industry else ''
+        
+        # Technology sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'technology', 'tech', 'software', 'hardware', 'semiconductor', 'internet', 
+            'cloud', 'saas', 'ai', 'artificial intelligence', 'cybersecurity'
+        ]):
+            return 'Tech Analyst'
+        
+        # Healthcare sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'healthcare', 'health', 'pharmaceutical', 'biotech', 'biotechnology', 
+            'medical', 'pharma', 'drug', 'therapeutic'
+        ]):
+            return 'Healthcare Specialist'
+        
+        # Energy sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'energy', 'oil', 'gas', 'petroleum', 'renewable', 'solar', 'wind', 
+            'utilities', 'power'
+        ]):
+            return 'Energy Expert'
+        
+        # Financial sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'financial', 'finance', 'banking', 'bank', 'insurance', 'investment', 
+            'capital', 'credit', 'lending'
+        ]):
+            return 'Financial Services Analyst'
+        
+        # Consumer sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'consumer', 'retail', 'consumer goods', 'consumer discretionary', 
+            'consumer staples', 'retail', 'e-commerce'
+        ]):
+            return 'Consumer Goods Analyst'
+        
+        # Industrial sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'industrial', 'manufacturing', 'machinery', 'aerospace', 'defense', 
+            'construction', 'engineering'
+        ]):
+            return 'Industrial Analyst'
+        
+        # Real Estate sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'real estate', 'reit', 'property', 'realty'
+        ]):
+            return 'Real Estate Analyst'
+        
+        # Communication/Media sector mapping
+        if any(keyword in sector_lower or keyword in industry_lower for keyword in [
+            'communication', 'telecom', 'media', 'entertainment', 'broadcasting'
+        ]):
+            return 'Media & Communications Analyst'
+        
+        # Fallback: Use common ticker-based mapping for well-known stocks
+        tech_tickers = ['AAPL', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA', 'NFLX', 'AMD', 'INTC']
+        healthcare_tickers = ['JNJ', 'PFE', 'UNH', 'ABBV', 'MRK', 'TMO', 'ABT', 'DHR']
+        financial_tickers = ['JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BLK']
+        
+        if ticker in tech_tickers:
+            return 'Tech Analyst'
+        elif ticker in healthcare_tickers:
+            return 'Healthcare Specialist'
+        elif ticker in financial_tickers:
+            return 'Financial Services Analyst'
+        
+        # Default fallback
+        return 'General Financial Analyst'
+    
     def optimize_context_for_tokens(self, tickers_data):
         """Optimize context to stay within token limits with enhanced guidance analysis"""
         def format_number(value):
@@ -199,16 +314,23 @@ class EarningsAgent:
             except (ValueError, TypeError):
                 return str(value)
         
-        optimized_context = """Analyze earnings results and provide sophisticated, forward-looking insights for each company. Focus on:
+        optimized_context = """Analyze earnings results and provide comprehensive, structured insights for each company. For each company, provide:
 
-1. GUIDANCE ANALYSIS: Extract and analyze forward-looking statements, outlook, and strategic initiatives
-2. STRATEGIC IMPLICATIONS: What the numbers mean for future growth, market position, and competitive advantage
-3. RISK FACTORS: Identify potential challenges and how management is addressing them
-4. INVESTMENT THESIS: Why investors should care beyond the obvious beats/misses
+1. EXECUTIVE SUMMARY: 2-3 sentence overview of strategic implications and key takeaways. DO NOT restate EPS/revenue numbers (those are already shown in the Financial Results section). Focus on what the results mean strategically, competitive implications, or forward-looking significance. If you would only restate the numbers, skip this section or provide meaningful strategic insights instead.
+2. STRATEGIC ANALYSIS: Deep dive into what the numbers mean for competitive position, market share, and future growth trajectory
+3. RISK FACTORS: Identify key risks (operational, financial, market, regulatory) and how management is addressing them
+4. INVESTMENT RECOMMENDATION: Clear recommendation (STRONG BUY / BUY / HOLD / SELL / STRONG SELL) with confidence level (High/Medium/Low) and brief reasoning
+5. EXPERT RECOMMENDATION: Which sector expert type should review this company (e.g., Tech Analyst, Healthcare Specialist, Energy Expert)
 
-Avoid stating the obvious (e.g., "EPS increased"). Instead, focus on strategic insights and guidance implications.
+Format your response as:
+TICKER:
+EXECUTIVE SUMMARY: [2-3 sentences of strategic insights - NOT just restating numbers]
+STRATEGIC ANALYSIS: [2-3 sentences]
+RISK FACTORS: [2-3 key risks]
+INVESTMENT RECOMMENDATION: [RECOMMENDATION] ([CONFIDENCE]) - [brief reasoning]
+EXPERT RECOMMENDATION: [Expert Type]
 
-Format: TICKER: [3-4 sophisticated insights with guidance analysis]
+Avoid stating the obvious (e.g., "EPS increased"). Focus on strategic insights, forward-looking implications, and actionable analysis. The Executive Summary should provide strategic context, not repeat financial metrics.
 
 """
         
@@ -216,11 +338,14 @@ Format: TICKER: [3-4 sophisticated insights with guidance analysis]
             earnings = data['earnings']
             news = data['news']
             
+            # Get sector/expert type
+            expert_type = self.get_company_sector(ticker)
+            
             # Extract guidance insights
             guidance_insights = self.extract_guidance_insights(news)
             
             # Create comprehensive context with guidance focus
-            context_line = f"""{ticker}: 
+            context_line = f"""{ticker} (Sector Expert: {expert_type}):
 EPS: {format_number(earnings.get('epsEstimate'))}→{format_number(earnings.get('epsActual'))} 
 Revenue: {format_number(earnings.get('revenueEstimate'))}→{format_number(earnings.get('revenueActual'))}
 Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insights else 'Limited guidance available'}
@@ -231,19 +356,34 @@ Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insight
         return optimized_context
     
     def generate_ai_insights_single(self, ticker, earnings_data, news_data):
-        """Generate AI insights for a single ticker using OpenAI SDK with enhanced guidance analysis"""
+        """Generate AI insights for a single ticker using OpenAI SDK with enhanced structured analysis"""
         if not self.openai_client:
-            return "AI insights disabled - set OPENAI_API_KEY to enable"
+            return {
+                'summary': 'AI insights disabled - set OPENAI_API_KEY to enable',
+                'strategic_analysis': '',
+                'risk_factors': '',
+                'investment_recommendation': 'N/A',
+                'expert_recommendation': 'General Financial Analyst'
+            }
         
         # Check cache first
         cache_key = f"{ticker}_{earnings_data.get('epsActual', 'N/A')}"
         if cache_key in self.insights_cache:
             print(f"✓ Using cached insights for {ticker}")
-            return self.insights_cache[cache_key]
+            cached = self.insights_cache[cache_key]
+            # Return cached data (could be dict or string)
+            if isinstance(cached, dict):
+                return cached
+            else:
+                # Parse old format if needed
+                return self.parse_structured_insights(cached, ticker)
         
         try:
             # Wait for rate limiting
             self.wait_for_openai_rate_limit()
+            
+            # Get sector/expert type
+            expert_type = self.get_company_sector(ticker)
             
             # Format numbers for better readability
             def format_number(value):
@@ -256,28 +396,35 @@ Guidance & Strategic Context: {' | '.join(guidance_insights) if guidance_insight
             
             # Build optimized context for single ticker
             context = f"""
-Analyze {ticker} earnings:
+Analyze earnings results for {ticker} (Sector Expert: {expert_type}):
 
 EPS: Est {format_number(earnings_data.get('epsEstimate'))} vs Actual {format_number(earnings_data.get('epsActual'))}
 Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {format_number(earnings_data.get('revenueActual'))}
 
-Key news: {', '.join([item.get('headline', 'N/A')[:40] for item in news_data[:1]])}
+News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
 
-Provide 2 concise, actionable insights. Focus on:
-- Strategic implications
-- Forward-looking guidance
-- Key risks or opportunities
+Provide comprehensive, structured insights:
+1. EXECUTIVE SUMMARY: 2-3 sentence overview of strategic implications and key takeaways. DO NOT restate EPS/revenue numbers (those are already shown). Focus on what the results mean strategically, competitive implications, or forward-looking significance. If you would only restate the numbers, skip this section or provide meaningful strategic insights instead.
+2. STRATEGIC ANALYSIS: What the results mean strategically
+3. RISK FACTORS: Key risks identified
+4. INVESTMENT RECOMMENDATION: Clear Buy/Hold/Sell with confidence level
+5. EXPERT RECOMMENDATION: Which sector expert should review (already identified as {expert_type}, confirm or suggest alternative)
 
-Keep each insight under 15 words.
+Format:
+EXECUTIVE SUMMARY: [strategic insights - NOT just restating numbers]
+STRATEGIC ANALYSIS: [content]
+RISK FACTORS: [content]
+INVESTMENT RECOMMENDATION: [RECOMMENDATION] ([CONFIDENCE]) - [reasoning]
+EXPERT RECOMMENDATION: [Expert Type]
 """
             
-            print(f"🤖 Generating focused AI insights for {ticker}...")
+            print(f"🤖 Generating enhanced AI insights for {ticker}...")
             
             # Use OpenAI SDK with enhanced prompt
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a senior financial analyst. Provide 2 concise, actionable insights per company. Each insight must be under 15 words. Focus on strategic implications, guidance, and key risks/opportunities. Use bullet points."},
+                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, risk factors, and investment theses. Provide decisive, actionable recommendations with clear reasoning. Avoid obvious statements and focus on sophisticated, informative analysis."},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request
@@ -285,20 +432,36 @@ Keep each insight under 15 words.
             
             content = response.choices[0].message.content
             
+            # Parse structured response
+            parsed_insights = self.parse_structured_insights(content, ticker)
+            
             # Cache the result
-            self.insights_cache[cache_key] = content
+            self.insights_cache[cache_key] = parsed_insights
             
             print(f"✓ Generated enhanced AI insights for {ticker}")
-            return content
+            return parsed_insights
             
         except Exception as e:
             print(f"✗ AI insights failed for {ticker}: {e}")
-            return f"AI insights unavailable: {str(e)}"
+            return {
+                'summary': f'AI insights unavailable: {str(e)}',
+                'strategic_analysis': '',
+                'risk_factors': '',
+                'investment_recommendation': 'N/A',
+                'expert_recommendation': self.get_company_sector(ticker)
+            }
     
     def generate_batched_ai_insights(self, tickers_data):
         """Generate AI insights for multiple tickers in one API call using OpenAI SDK"""
         if not self.openai_client:
-            return {ticker: "AI insights disabled - set OPENAI_API_KEY to enable" for ticker in tickers_data.keys()}
+            default_insight = {
+                'summary': 'AI insights disabled - set OPENAI_API_KEY to enable',
+                'strategic_analysis': '',
+                'risk_factors': '',
+                'investment_recommendation': 'N/A',
+                'expert_recommendation': 'General Financial Analyst'
+            }
+            return {ticker: default_insight for ticker in tickers_data.keys()}
         
         try:
             # Wait for rate limiting
@@ -313,7 +476,7 @@ Keep each insight under 15 words.
             response = self.openai_client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a senior financial analyst. For each company, provide 2 concise, actionable insights. Each insight must be under 15 words. Focus on strategic implications, guidance, and key risks/opportunities. Use bullet points and format as 'TICKER: • Insight 1 • Insight 2'"},
+                    {"role": "system", "content": "You are a senior financial analyst specializing in earnings analysis and strategic insights. You excel at identifying forward-looking guidance, strategic implications, risk factors, and investment theses. Provide decisive, actionable recommendations with clear reasoning. For each company, provide structured insights covering executive summary, strategic analysis, risk factors, investment recommendation, and expert recommendation. Avoid obvious statements and focus on sophisticated, informative analysis."},
                     {"role": "user", "content": context}
                 ],
                 max_tokens=self.max_tokens_per_request * len(tickers_data)  # Scale tokens with ticker count
@@ -324,12 +487,12 @@ Keep each insight under 15 words.
             # Debug: Show the raw AI response
             print(f"✓ Generated AI insights for {len(tickers_data)} tickers in one API call")
             
-            # Parse the response to extract insights for each ticker
+            # Parse the response to extract structured insights for each ticker
             insights = {}
             current_ticker = None
-            current_insights = []
+            current_ticker_content = []
             
-            # More robust parsing - try multiple approaches
+            # Split by ticker sections
             lines = content.split('\n')
             
             for i, line in enumerate(lines):
@@ -340,32 +503,38 @@ Keep each insight under 15 words.
                 # Check if this line starts with a ticker symbol
                 ticker_found = None
                 for ticker in tickers_data.keys():
-                    if line.upper().startswith(ticker.upper()):
+                    if line.upper().startswith(ticker.upper() + ':') or line.upper().startswith(ticker.upper() + ' '):
                         ticker_found = ticker
                         break
                 
                 if ticker_found:
                     # Save previous ticker's insights
-                    if current_ticker:
-                        insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
+                    if current_ticker and current_ticker_content:
+                        ticker_text = '\n'.join(current_ticker_content)
+                        insights[current_ticker] = self.parse_structured_insights(ticker_text, current_ticker)
                     
                     # Start new ticker
                     current_ticker = ticker_found
-                    current_insights = []
-                elif current_ticker and (line.startswith('-') or line.startswith('•') or line.startswith('*')):
-                    current_insights.append(line)
-                elif current_ticker and line:
-                    # If line doesn't start with bullet but has content, treat as insight
-                    current_insights.append(f"• {line}")
+                    current_ticker_content = []
+                    # Add the ticker line if it has content after the ticker
+                    if ':' in line:
+                        remaining = line.split(':', 1)[1].strip()
+                        if remaining:
+                            current_ticker_content.append(remaining)
+                elif current_ticker:
+                    # Add to current ticker's content
+                    current_ticker_content.append(line)
             
             # Save last ticker's insights
-            if current_ticker:
-                insights[current_ticker] = '\n'.join(current_insights) if current_insights else "No insights available"
+            if current_ticker and current_ticker_content:
+                ticker_text = '\n'.join(current_ticker_content)
+                insights[current_ticker] = self.parse_structured_insights(ticker_text, current_ticker)
             
-            # Fill in any missing tickers
+            # Fill in any missing tickers with parsed insights from full text
             for ticker in tickers_data.keys():
                 if ticker not in insights:
-                    insights[ticker] = "AI insights unavailable"
+                    # Try to find ticker content in the full response
+                    insights[ticker] = self.parse_structured_insights(content, ticker)
             
             return insights
             
@@ -383,6 +552,7 @@ Keep each insight under 15 words.
             print(f" Processing {ticker} ({i+1}/{len(tickers_data)})...")
             
             insight = self.generate_ai_insights_single(ticker, data['earnings'], data['news'])
+            # generate_ai_insights_single now returns a dict, so we can use it directly
             insights[ticker] = insight
             
             # Wait between individual calls to avoid rate limiting
@@ -412,6 +582,169 @@ Keep each insight under 15 words.
                 guidance_insights.append(f"INVESTOR RELATIONS: {item.get('headline', 'N/A')}")
         
         return guidance_insights[:3]  # Return top 3 most relevant
+    
+    def _is_meaningful_summary(self, summary_text):
+        """Check if summary contains meaningful insights vs just restating stats"""
+        if not summary_text or len(summary_text.strip()) < 50:
+            return False
+        
+        summary_lower = summary_text.lower()
+        
+        # Check for strategic keywords
+        strategic_keywords = [
+            'implication', 'strategic', 'competitive', 'market', 'outlook', 
+            'guidance', 'position', 'growth', 'trajectory', 'advantage',
+            'challenge', 'opportunity', 'trend', 'shift', 'momentum',
+            'resilience', 'strength', 'weakness', 'headwind', 'tailwind',
+            'environment', 'landscape', 'dynamics', 'cycle', 'phase'
+        ]
+        
+        # Check if it's just restating stats
+        stat_phrases = [
+            'eps of', 'revenue of', 'beat expectations', 'missed expectations',
+            'earnings per share', 'reported revenue', 'actual eps', 'actual revenue',
+            'estimated', 'vs actual', 'vs estimate', 'compared to'
+        ]
+        
+        has_strategic_content = any(keyword in summary_lower for keyword in strategic_keywords)
+        
+        # Count how many stat phrases appear
+        stat_phrase_count = sum(1 for phrase in stat_phrases if phrase in summary_lower)
+        
+        # If it has multiple stat phrases and no strategic content, it's likely just restating stats
+        is_just_stats = stat_phrase_count >= 2 and not has_strategic_content
+        
+        # Also check if it's too short and only contains numbers/stat language
+        if len(summary_text) < 100 and stat_phrase_count >= 1 and not has_strategic_content:
+            return False
+        
+        return has_strategic_content or (not is_just_stats and len(summary_text) > 100)
+    
+    def _format_insights_html(self, summary, strategic_analysis, risk_factors):
+        """Format insights sections as HTML"""
+        sections = []
+        
+        # Only include Executive Summary if it contains meaningful insights
+        if summary and self._is_meaningful_summary(summary):
+            sections.append(f'''
+                    <div class="insight-section">
+                        <h4>📋 Executive Summary</h4>
+                        <p>{summary}</p>
+                    </div>
+                    ''')
+        
+        if strategic_analysis:
+            sections.append(f'''
+                    <div class="insight-section">
+                        <h4>🎯 Strategic Analysis</h4>
+                        <p>{strategic_analysis}</p>
+                    </div>
+                    ''')
+        
+        if risk_factors:
+            sections.append(f'''
+                    <div class="insight-section">
+                        <h4>⚠️ Risk Factors</h4>
+                        <p>{risk_factors}</p>
+                    </div>
+                    ''')
+        
+        if not sections:
+            sections.append(f'''
+                    <div class="insight-section">
+                        <p>{summary if summary else "No insights available"}</p>
+                    </div>
+                    ''')
+        
+        return ''.join(sections)
+    
+    def parse_structured_insights(self, response_text, ticker):
+        """Parse AI response into structured format"""
+        # Default values
+        result = {
+            'summary': '',
+            'strategic_analysis': '',
+            'risk_factors': '',
+            'investment_recommendation': 'HOLD (Medium Confidence)',
+            'expert_recommendation': self.get_company_sector(ticker)
+        }
+        
+        if not response_text:
+            return result
+        
+        # Try to parse structured format
+        lines = response_text.split('\n')
+        current_section = None
+        current_content = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                    current_content = []
+                continue
+            
+            # Check for section headers
+            if 'EXECUTIVE SUMMARY' in line.upper():
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                current_section = 'summary'
+                current_content = []
+                # Extract content after colon if present
+                if ':' in line:
+                    content = line.split(':', 1)[1].strip()
+                    if content:
+                        current_content.append(content)
+            elif 'STRATEGIC ANALYSIS' in line.upper():
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                current_section = 'strategic_analysis'
+                current_content = []
+                if ':' in line:
+                    content = line.split(':', 1)[1].strip()
+                    if content:
+                        current_content.append(content)
+            elif 'RISK FACTORS' in line.upper() or 'RISK FACTOR' in line.upper():
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                current_section = 'risk_factors'
+                current_content = []
+                if ':' in line:
+                    content = line.split(':', 1)[1].strip()
+                    if content:
+                        current_content.append(content)
+            elif 'INVESTMENT RECOMMENDATION' in line.upper():
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                current_section = 'investment_recommendation'
+                current_content = []
+                if ':' in line:
+                    content = line.split(':', 1)[1].strip()
+                    if content:
+                        result['investment_recommendation'] = content
+                        current_section = None
+            elif 'EXPERT RECOMMENDATION' in line.upper():
+                if current_section and current_content:
+                    result[current_section] = ' '.join(current_content)
+                if ':' in line:
+                    content = line.split(':', 1)[1].strip()
+                    if content:
+                        result['expert_recommendation'] = content
+                current_section = None
+            elif current_section:
+                # Continue adding to current section
+                current_content.append(line)
+        
+        # Save last section
+        if current_section and current_content:
+            result[current_section] = ' '.join(current_content)
+        
+        # Fallback: if no structured format found, treat as summary
+        if not result['summary'] and not result['strategic_analysis']:
+            result['summary'] = response_text[:500]  # First 500 chars as summary
+        
+        return result
     
     def create_email_content(self, ticker, earnings_data, news_data, ai_insights):
         """Create simple, clean email content"""
@@ -473,8 +806,39 @@ Keep each insight under 15 words.
         except (ValueError, TypeError) as e:
             eps_beat = rev_beat = "—"
         
-        # Pre-format the insights for HTML
-        formatted_insights = self.format_insights_for_html(ai_insights)
+        # Handle structured insights (dict) or legacy format (string)
+        if isinstance(ai_insights, dict):
+            summary = ai_insights.get('summary', 'No summary available')
+            strategic_analysis = ai_insights.get('strategic_analysis', 'No strategic analysis available')
+            risk_factors = ai_insights.get('risk_factors', 'No risk factors identified')
+            investment_rec = ai_insights.get('investment_recommendation', 'HOLD (Medium Confidence)')
+            expert_rec = ai_insights.get('expert_recommendation', 'General Financial Analyst')
+        else:
+            # Legacy string format - convert to structured
+            summary = str(ai_insights) if ai_insights else 'No insights available'
+            strategic_analysis = ''
+            risk_factors = ''
+            investment_rec = 'HOLD (Medium Confidence)'
+            expert_rec = self.get_company_sector(ticker)
+        
+        # Parse investment recommendation for styling
+        rec_upper = investment_rec.upper()
+        if 'STRONG BUY' in rec_upper or 'STRONG BUY' in rec_upper:
+            rec_class = 'strong-buy'
+            rec_color = '#28a745'
+            rec_bg = '#d4edda'
+        elif 'BUY' in rec_upper:
+            rec_class = 'buy'
+            rec_color = '#20c997'
+            rec_bg = '#d1ecf1'
+        elif 'SELL' in rec_upper or 'STRONG SELL' in rec_upper:
+            rec_class = 'sell'
+            rec_color = '#dc3545'
+            rec_bg = '#f8d7da'
+        else:
+            rec_class = 'hold'
+            rec_color = '#ffc107'
+            rec_bg = '#fff3cd'
         
         # Simple, clean HTML
         html_content = f"""
@@ -486,12 +850,10 @@ Keep each insight under 15 words.
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     line-height: 1.6;
                     color: #333;
-                    max-width: 800px;
-                    min-width: 600px;
+                    max-width: 600px;
                     margin: 0 auto;
                     padding: 20px;
                     background-color: #f9f9f9;
-                    box-sizing: border-box;
                 }}
                 .header {{
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -512,9 +874,6 @@ Keep each insight under 15 words.
                     padding: 20px;
                     margin-bottom: 20px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    width: 100%;
-                    box-sizing: border-box;
-                    overflow: visible;
                 }}
                 /* New styles for dashboard grid */
                 .dashboard-grid {{
@@ -595,8 +954,6 @@ Keep each insight under 15 words.
                     min-width: 80px;
                     text-transform: uppercase;
                     letter-spacing: 0.5px;
-                    margin-top: 10px;
-                    margin-bottom: 10px;
                 }}
                 .progress-label.beat {{
                     background: #d4edda;
@@ -618,82 +975,13 @@ Keep each insight under 15 words.
                     border-left: 4px solid #ffc107;
                     padding: 20px;
                     border-radius: 4px;
-                    line-height: 1.6;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    white-space: normal;
-                    max-width: 100%;
-                    box-sizing: border-box;
-                    min-height: 60px;
-                    display: block;
-                    overflow: visible;
-                    text-overflow: clip;
+                    line-height: 1.8;
                 }}
                 .insights p {{
                     margin: 0 0 15px 0;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
                 }}
                 .insights p:last-child {{
                     margin-bottom: 0;
-                }}
-                .insight-item {{
-                    display: flex;
-                    align-items: flex-start;
-                    margin-bottom: 15px;
-                    padding: 12px 15px;
-                    background: rgba(255, 255, 255, 0.7);
-                    border-radius: 6px;
-                    border-left: 3px solid #ffc107;
-                    transition: all 0.2s ease;
-                }}
-                .insight-item:hover {{
-                    background: rgba(255, 255, 255, 0.9);
-                    transform: translateX(2px);
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                }}
-                .insight-bullet {{
-                    font-size: 1.3em;
-                    color: #ffc107;
-                    margin-right: 12px;
-                    font-weight: bold;
-                    min-width: 20px;
-                }}
-                .insight-number {{
-                    font-size: 1.3em;
-                    color: #ffc107;
-                    margin-right: 12px;
-                    font-weight: bold;
-                    min-width: 20px;
-                }}
-                .insight-text {{
-                    flex-grow: 1;
-                    font-size: 0.95em;
-                    color: #343a40;
-                    line-height: 1.5;
-                    font-weight: 500;
-                }}
-                .insights-container {{
-                    margin-top: 20px;
-                    padding-top: 15px;
-                    border-top: 1px solid #eee;
-                }}
-                .insights-header {{
-                    font-size: 1.2em;
-                    font-weight: 700;
-                    color: #495057;
-                    margin-bottom: 20px;
-                    padding: 10px 15px;
-                    border-bottom: 2px solid #ffc107;
-                    padding-bottom: 10px;
-                    background: rgba(255, 193, 7, 0.1);
-                    border-radius: 6px 6px 0 0;
-                }}
-                .no-insights {{
-                    font-style: italic;
-                    color: #6c757d;
-                    padding: 15px;
-                    text-align: center;
                 }}
                 .news-item {{
                     padding: 10px 0;
@@ -743,6 +1031,60 @@ Keep each insight under 15 words.
                     color: #383d41;
                     border: 2px solid #d6d8db;
                 }}
+                .recommendation-badge {{
+                    display: inline-block;
+                    padding: 12px 24px;
+                    border-radius: 25px;
+                    font-weight: bold;
+                    font-size: 1.1em;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    margin: 10px 0;
+                }}
+                .recommendation-badge.strong-buy {{
+                    background: #d4edda;
+                    color: #155724;
+                    border: 2px solid #c3e6cb;
+                }}
+                .recommendation-badge.buy {{
+                    background: #d1ecf1;
+                    color: #0c5460;
+                    border: 2px solid #bee5eb;
+                }}
+                .recommendation-badge.hold {{
+                    background: #fff3cd;
+                    color: #856404;
+                    border: 2px solid #ffeaa7;
+                }}
+                .recommendation-badge.sell {{
+                    background: #f8d7da;
+                    color: #721c24;
+                    border: 2px solid #f5c6cb;
+                }}
+                .expert-badge {{
+                    display: inline-block;
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    background: #e7f3ff;
+                    color: #004085;
+                    border: 2px solid #b3d7ff;
+                    font-weight: 600;
+                    margin: 10px 0;
+                }}
+                .insight-section {{
+                    margin-bottom: 20px;
+                }}
+                .insight-section h4 {{
+                    margin: 0 0 10px 0;
+                    color: #495057;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                }}
+                .insight-section p {{
+                    margin: 0;
+                    line-height: 1.6;
+                    color: #333;
+                }}
             </style>
         </head>
         <body>
@@ -790,7 +1132,7 @@ Keep each insight under 15 words.
                         </div>
                         <div class="progress-container">
                             <div class="progress-bar">
-                                <div class="progress-fill {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else 'neutral'}"></div>
+                                <div class="progress-fill {'beat' if 'BEAT' in rev_beat else 'miss' if 'MISS' in rev_beat else '50%'}"></div>
                             </div>
                         </div>
                     </div>
@@ -798,9 +1140,30 @@ Keep each insight under 15 words.
             </div>
             
             <div class="card">
+                <h3 style="margin-top: 0; color: #495057;">💡 Investment Recommendation</h3>
+                <div style="text-align: center;">
+                    <div class="recommendation-badge {rec_class}">
+                        {investment_rec}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3 style="margin-top: 0; color: #495057;">👤 Expert Recommendation</h3>
+                <div style="text-align: center;">
+                    <div class="expert-badge">
+                        {expert_rec}
+                    </div>
+                    <p style="margin-top: 10px; color: #6c757d; font-size: 0.9em;">
+                        Recommended expert type for detailed sector-specific analysis
+                    </p>
+                </div>
+            </div>
+            
+            <div class="card">
                 <h3 style="margin-top: 0; color: #495057;">🧠 AI Insights</h3>
                 <div class="insights">
-                    {formatted_insights}
+                    {self._format_insights_html(summary, strategic_analysis, risk_factors)}
                 </div>
             </div>
             
@@ -843,6 +1206,29 @@ Keep each insight under 15 words.
             rev_est = format_revenue(earnings_data.get('revenueEstimate'))
             rev_act = format_revenue(earnings_data.get('revenueActual'))
             
+            # Handle structured insights for plain text
+            if isinstance(ai_insights, dict):
+                summary_text = ai_insights.get('summary', 'No summary available')
+                strategic_text = ai_insights.get('strategic_analysis', '')
+                risks_text = ai_insights.get('risk_factors', '')
+                rec_text = ai_insights.get('investment_recommendation', 'HOLD')
+                expert_text = ai_insights.get('expert_recommendation', 'General Financial Analyst')
+                insights_text = f"""
+EXECUTIVE SUMMARY:
+{summary_text}
+
+STRATEGIC ANALYSIS:
+{strategic_text if strategic_text else 'No strategic analysis available'}
+
+RISK FACTORS:
+{risks_text if risks_text else 'No risk factors identified'}
+
+INVESTMENT RECOMMENDATION: {rec_text}
+EXPERT RECOMMENDATION: {expert_text}
+"""
+            else:
+                insights_text = str(ai_insights).replace('<br>', '\n').replace('<strong>', '').replace('</strong>', '')
+            
             # Create simple plain text version
             text_content = f"""
  {ticker} EARNINGS REPORT
@@ -856,7 +1242,7 @@ Keep each insight under 15 words.
  
  🧠 AI INSIGHTS
  {'-' * 15}
- {ai_insights.replace('<br>', '\n').replace('<strong>', '').replace('</strong>', '').replace('•', '• ')}
+ {insights_text}
  
  📰 RECENT NEWS
  {'-' * 15}
@@ -894,7 +1280,7 @@ Keep each insight under 15 words.
         
         # Determine date to check
         if test_mode:
-            target_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            target_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
         else:
             target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
         
@@ -953,57 +1339,27 @@ Keep each insight under 15 words.
         for ticker, data in tickers_data.items():
             print(f"\n--- Sending email for {ticker} ---")
             
+            # Get insights for this ticker (handle both dict and string formats)
+            ticker_insights = ai_insights.get(ticker, {})
+            if not isinstance(ticker_insights, dict):
+                # Legacy format - create default dict
+                ticker_insights = {
+                    'summary': str(ticker_insights) if ticker_insights else 'No insights available',
+                    'strategic_analysis': '',
+                    'risk_factors': '',
+                    'investment_recommendation': 'HOLD (Medium Confidence)',
+                    'expert_recommendation': self.get_company_sector(ticker)
+                }
+            
             # Create and send email
             subject = f"{ticker} Earnings Report"
-            html_content = self.create_email_content(ticker, data['earnings'], data['news'], ai_insights.get(ticker, 'No insights available'))
+            html_content = self.create_email_content(ticker, data['earnings'], data['news'], ticker_insights)
             
-            if self.send_email(ticker, subject, html_content, data['earnings'], data['news'], ai_insights.get(ticker, 'No insights available')):
+            if self.send_email(ticker, subject, html_content, data['earnings'], data['news'], ticker_insights):
                 emails_sent += 1
         
         print(f"\n🎉 Processing complete! Sent {emails_sent} emails for {target_date}")
         print("✅ Simple rate limiting implemented successfully")
-
-    def format_insights_for_html(self, insights_text):
-        """Format AI insights with proper HTML structure and titles"""
-        if not insights_text or insights_text == "AI insights unavailable":
-            return '<div class="no-insights">No AI insights available</div>'
-        
-        # Split insights into lines and clean them up
-        lines = insights_text.strip().split('\n')
-        formatted_insights = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Check if this is a bullet point or numbered item
-            if line.startswith('•') or line.startswith('-') or line.startswith('*'):
-                # Extract the insight text
-                insight_text = line[1:].strip()
-                if insight_text:
-                    formatted_insights.append(f'<div class="insight-item"><span class="insight-bullet">•</span><span class="insight-text">{insight_text}</span></div>')
-            elif line.startswith('1.') or line.startswith('2.') or line.startswith('3.') or line.startswith('4.'):
-                # Handle numbered insights
-                parts = line.split('.', 1)
-                if len(parts) > 1:
-                    insight_text = parts[1].strip()
-                    if insight_text:
-                        formatted_insights.append(f'<div class="insight-item"><span class="insight-number">{parts[0]}.</span><span class="insight-text">{insight_text}</span></div>')
-            elif line and not line.startswith('TICKER:'):
-                # Treat as regular insight text
-                formatted_insights.append(f'<div class="insight-item"><span class="insight-bullet">•</span><span class="insight-text">{line}</span></div>')
-        
-        if not formatted_insights:
-            return '<div class="no-insights">No structured insights available</div>'
-        
-        # Create the formatted HTML
-        html_content = '<div class="insights-container">'
-        html_content += '<div class="insights-header">Key Strategic Insights</div>'
-        html_content += ''.join(formatted_insights)
-        html_content += '</div>'
-        
-        return html_content
 
 def main():
     """Main entry point"""
