@@ -316,7 +316,7 @@ class EarningsAgent:
         
         optimized_context = """Analyze earnings results and provide comprehensive, structured insights for each company. For each company, provide:
 
-1. EXECUTIVE SUMMARY: 2-3 sentence overview of the key results and their significance
+1. EXECUTIVE SUMMARY: 2-3 sentence overview of strategic implications and key takeaways. DO NOT restate EPS/revenue numbers (those are already shown in the Financial Results section). Focus on what the results mean strategically, competitive implications, or forward-looking significance. If you would only restate the numbers, skip this section or provide meaningful strategic insights instead.
 2. STRATEGIC ANALYSIS: Deep dive into what the numbers mean for competitive position, market share, and future growth trajectory
 3. RISK FACTORS: Identify key risks (operational, financial, market, regulatory) and how management is addressing them
 4. INVESTMENT RECOMMENDATION: Clear recommendation (STRONG BUY / BUY / HOLD / SELL / STRONG SELL) with confidence level (High/Medium/Low) and brief reasoning
@@ -324,13 +324,13 @@ class EarningsAgent:
 
 Format your response as:
 TICKER:
-EXECUTIVE SUMMARY: [2-3 sentences]
+EXECUTIVE SUMMARY: [2-3 sentences of strategic insights - NOT just restating numbers]
 STRATEGIC ANALYSIS: [2-3 sentences]
 RISK FACTORS: [2-3 key risks]
 INVESTMENT RECOMMENDATION: [RECOMMENDATION] ([CONFIDENCE]) - [brief reasoning]
 EXPERT RECOMMENDATION: [Expert Type]
 
-Avoid stating the obvious (e.g., "EPS increased"). Focus on strategic insights, forward-looking implications, and actionable analysis.
+Avoid stating the obvious (e.g., "EPS increased"). Focus on strategic insights, forward-looking implications, and actionable analysis. The Executive Summary should provide strategic context, not repeat financial metrics.
 
 """
         
@@ -404,14 +404,14 @@ Revenue: Est {format_number(earnings_data.get('revenueEstimate'))} vs Actual {fo
 News: {', '.join([item.get('headline', 'N/A')[:50] for item in news_data[:2]])}
 
 Provide comprehensive, structured insights:
-1. EXECUTIVE SUMMARY: 2-3 sentence overview
+1. EXECUTIVE SUMMARY: 2-3 sentence overview of strategic implications and key takeaways. DO NOT restate EPS/revenue numbers (those are already shown). Focus on what the results mean strategically, competitive implications, or forward-looking significance. If you would only restate the numbers, skip this section or provide meaningful strategic insights instead.
 2. STRATEGIC ANALYSIS: What the results mean strategically
 3. RISK FACTORS: Key risks identified
 4. INVESTMENT RECOMMENDATION: Clear Buy/Hold/Sell with confidence level
 5. EXPERT RECOMMENDATION: Which sector expert should review (already identified as {expert_type}, confirm or suggest alternative)
 
 Format:
-EXECUTIVE SUMMARY: [content]
+EXECUTIVE SUMMARY: [strategic insights - NOT just restating numbers]
 STRATEGIC ANALYSIS: [content]
 RISK FACTORS: [content]
 INVESTMENT RECOMMENDATION: [RECOMMENDATION] ([CONFIDENCE]) - [reasoning]
@@ -583,11 +583,49 @@ EXPERT RECOMMENDATION: [Expert Type]
         
         return guidance_insights[:3]  # Return top 3 most relevant
     
+    def _is_meaningful_summary(self, summary_text):
+        """Check if summary contains meaningful insights vs just restating stats"""
+        if not summary_text or len(summary_text.strip()) < 50:
+            return False
+        
+        summary_lower = summary_text.lower()
+        
+        # Check for strategic keywords
+        strategic_keywords = [
+            'implication', 'strategic', 'competitive', 'market', 'outlook', 
+            'guidance', 'position', 'growth', 'trajectory', 'advantage',
+            'challenge', 'opportunity', 'trend', 'shift', 'momentum',
+            'resilience', 'strength', 'weakness', 'headwind', 'tailwind',
+            'environment', 'landscape', 'dynamics', 'cycle', 'phase'
+        ]
+        
+        # Check if it's just restating stats
+        stat_phrases = [
+            'eps of', 'revenue of', 'beat expectations', 'missed expectations',
+            'earnings per share', 'reported revenue', 'actual eps', 'actual revenue',
+            'estimated', 'vs actual', 'vs estimate', 'compared to'
+        ]
+        
+        has_strategic_content = any(keyword in summary_lower for keyword in strategic_keywords)
+        
+        # Count how many stat phrases appear
+        stat_phrase_count = sum(1 for phrase in stat_phrases if phrase in summary_lower)
+        
+        # If it has multiple stat phrases and no strategic content, it's likely just restating stats
+        is_just_stats = stat_phrase_count >= 2 and not has_strategic_content
+        
+        # Also check if it's too short and only contains numbers/stat language
+        if len(summary_text) < 100 and stat_phrase_count >= 1 and not has_strategic_content:
+            return False
+        
+        return has_strategic_content or (not is_just_stats and len(summary_text) > 100)
+    
     def _format_insights_html(self, summary, strategic_analysis, risk_factors):
         """Format insights sections as HTML"""
         sections = []
         
-        if summary:
+        # Only include Executive Summary if it contains meaningful insights
+        if summary and self._is_meaningful_summary(summary):
             sections.append(f'''
                     <div class="insight-section">
                         <h4>📋 Executive Summary</h4>
