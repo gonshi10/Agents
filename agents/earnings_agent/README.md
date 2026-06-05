@@ -36,7 +36,7 @@ Copy `env.example` to `.env` and configure:
 - `SMTP_USER` (required)
 - `SMTP_PASS` (required)
 - `EMAIL_TO` (required)
-- `WATCHLIST_CSV` (default: `./watchlist.csv`)
+- `WATCHLIST_CSV` (default: `./agents/earnings_agent/data/watchlist.csv`)
 - `TEST_MODE` (`true`/`false`, default: `false`)
 
 ## Watchlist Format
@@ -49,6 +49,8 @@ AAPL
 MSFT
 NVDA
 ```
+
+Default location in this repo: `agents/earnings_agent/data/watchlist.csv`.
 
 ## Runtime Notes
 
@@ -71,4 +73,9 @@ python -m agents.earnings_agent.main
 - Missing env vars: verify `.env` matches keys listed above.
 - SMTP failures: validate host/port/user/password and provider app-password settings.
 - No reports sent: verify the watchlist path and whether the target date had earnings events.
+
+## Local Assets
+
+- `agents/earnings_agent/data/watchlist.csv`: default watchlist file for this agent.
+- `agents/earnings_agent/data/email_preview.html`: static preview sample for the earnings email template.
 

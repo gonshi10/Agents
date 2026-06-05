@@ -10,8 +10,10 @@ Each agent is isolated under `agents/<agent_name>/`, while all reusable infrastr
 Agents/
 ├── common/                       # shared config, clients, email, helpers
 ├── agents/
-│   └── earnings_agent/           # earnings-specific logic and docs
-├── watchlist.csv
+│   └── earnings_agent/           # earnings-specific logic, docs, and data
+│       └── data/
+│           ├── watchlist.csv
+│           └── email_preview.html
 ├── env.example
 └── .github/workflows/
 ```
