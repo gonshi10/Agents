@@ -38,7 +38,7 @@ Same shared config as the earnings agent (see repo `env.example`):
 - Required: `FINNHUB_API_KEY`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_TO`
 - Optional: `OPENAI_API_KEY` / `OPENAI_MODEL` (AI insights; agent runs with
   fallback text when unset), `SMTP_HOST`, `SMTP_PORT`, `TEST_MODE`
-- `WATCHLIST_CSV` — point at `./agents/ratings_agent/data/watchlist.csv`
+- `WATCHLIST_CSV` — defaults to `./common/data/watchlist.csv`
 - `RATINGS_PT_SNAPSHOT` — path to the price-target snapshot file
 
 The watchlist CSV uses a single `Symbol` column (read by `common/watchlist.py`).

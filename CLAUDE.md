@@ -11,13 +11,19 @@ pip install -r requirements.txt
 # Run the earnings agent (from repo root; needs a populated .env)
 python -m agents.earnings_agent.main
 
-# Run the smoke test suite (plain script, not pytest — exits non-zero on failure)
+# Run the earnings agent smoke test (plain script, not pytest — exits non-zero on failure)
 python -m agents.earnings_agent.tests.test_agent
 
 # Manual debug scripts that hit live APIs (require valid keys in .env)
 python -m agents.earnings_agent.tests.test_ai_insights
 python -m agents.earnings_agent.tests.debug_insights
 python -m agents.earnings_agent.tests.debug_ai_insights
+
+# Run the ratings agent (from repo root; needs a populated .env)
+python -m agents.ratings_agent.main
+
+# Ratings agent smoke test (also runs offline change-detection checks)
+python -m agents.ratings_agent.tests.test_agent
 ```
 
 There is no linter or pytest configured. Tests are standalone scripts with a `main()` that returns an exit code; they do not use a test framework, so run them as modules (not `pytest`).
@@ -32,14 +38,21 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 - `common/config.py` — single `Settings` dataclass loaded once via `get_settings()` (`lru_cache`). All env access goes through here; agents never call `os.getenv` directly.
 - `common/clients/` — API wrappers (`FinnhubClient`, `OpenAIClient`), each with its own built-in rate limiting.
 - `common/email/sender.py` — `EmailSender`, SMTP multipart (plain + HTML).
-- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the watchlist CSV.
-- `agents/earnings_agent/` — the only runnable agent. `agent.py` holds `EarningsAgent`; `prompts.py` holds the LLM templates; `main.py`/`__main__.py` are the entrypoints.
+- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the watchlist CSV (shared default `common/data/watchlist.csv`).
+- `agents/earnings_agent/` — `agent.py` holds `EarningsAgent`; `prompts.py` holds the LLM templates; `main.py`/`__main__.py` are the entrypoints.
+- `agents/ratings_agent/` — `agent.py` holds `RatingsAgent` (analyst rating-change alerts); same `prompts.py`/`main.py`/`__main__.py` layout.
 
 ### Earnings agent flow (`EarningsAgent.run`)
 1. Compute `target_date` — yesterday normally, 3 days ago when `TEST_MODE=true` (wider window so local runs find data).
 2. For each watchlist ticker: fetch earnings calendar + filtered company news from Finnhub. Tickers with no earnings on the date are skipped.
 3. Generate AI insights via `generate_batched_ai_insights` — one batched OpenAI call for all tickers, falling back to per-ticker calls (`run_with_fallback`) on failure.
 4. Build HTML + plain-text email per ticker and send one email each.
+
+### Ratings agent flow (`RatingsAgent.run`)
+1. For each watchlist ticker, fetch recommendation trends + price target from Finnhub.
+2. **Recommendation change is stateless** — diff the weighted consensus score of the latest vs prior monthly period (threshold in `agent.py`); no stored state.
+3. **Price-target change is stateful** — compare the current mean target against a JSON snapshot (`RATINGS_PT_SNAPSHOT`) of last-seen targets; the snapshot is rewritten every run (baselines for untouched tickers carried forward). In CI the snapshot survives ephemeral runners via `actions/cache`, so a ticker's price-target alerts begin on its second run.
+4. Only changed tickers get AI insights (batched, with per-ticker fallback) and one email each. The ratings parser uses a `RATING RATIONALE` header where earnings uses `STRATEGIC ANALYSIS` — each agent owns its own `parse_structured_insights`.
 
 ### Key design points
 - **AI is optional.** When `OPENAI_API_KEY` is unset, `OpenAIClient.is_enabled` is `False` and the agent still runs with non-AI fallback text. Guard any new OpenAI use behind `is_enabled`.
@@ -49,7 +62,7 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 - **Failures are swallowed, not raised.** Client methods catch exceptions, print a message, and return empty/`None`; callers check for falsy results. Preserve this so one bad ticker doesn't abort the run.
 
 ### Automation
-`.github/workflows/earnings-agent.yml` runs the agent daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names.
+`.github/workflows/earnings-agent.yml` and `.github/workflows/ratings-agent.yml` run their agents daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings workflow adds an `actions/cache` step to persist the price-target snapshot between runs.
 
 ## Adding a new agent
 Create `agents/<new_agent>/` with `agent.py`, `prompts.py`, `main.py`, and `README.md`; reuse `common/` modules; add a workflow under `.github/workflows/` if it needs scheduling. The `scaffold-new-agent` skill (see below) automates this scaffold.

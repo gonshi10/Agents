@@ -47,7 +47,7 @@ jobs:
           OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL:         ${{ secrets.OPENAI_MODEL }}
           # Ratings-agent-specific
-          WATCHLIST_CSV:        ./agents/ratings_agent/data/watchlist.csv
+          WATCHLIST_CSV:        ./common/data/watchlist.csv
           RATINGS_PT_SNAPSHOT:  ./agents/ratings_agent/data/price_targets.snapshot.json
         run: |
           python -m agents.ratings_agent.main

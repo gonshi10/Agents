@@ -36,7 +36,7 @@ Copy `env.example` to `.env` and configure:
 - `SMTP_USER` (required)
 - `SMTP_PASS` (required)
 - `EMAIL_TO` (required)
-- `WATCHLIST_CSV` (default: `./agents/earnings_agent/data/watchlist.csv`)
+- `WATCHLIST_CSV` (default: `./common/data/watchlist.csv`)
 - `TEST_MODE` (`true`/`false`, default: `false`)
 
 ## Watchlist Format
@@ -50,7 +50,7 @@ MSFT
 NVDA
 ```
 
-Default location in this repo: `agents/earnings_agent/data/watchlist.csv`.
+Default location in this repo: `common/data/watchlist.csv`.
 
 ## Runtime Notes
 
@@ -76,6 +76,6 @@ python -m agents.earnings_agent.main
 
 ## Local Assets
 
-- `agents/earnings_agent/data/watchlist.csv`: default watchlist file for this agent.
 - `agents/earnings_agent/data/email_preview.html`: static preview sample for the earnings email template.
+- `common/data/watchlist.csv`: shared watchlist used by earnings and ratings agents by default.
 

@@ -8,12 +8,15 @@ Each agent is isolated under `agents/<agent_name>/`, while all reusable infrastr
 
 ```text
 Agents/
-├── common/                       # shared config, clients, email, helpers
+├── common/                       # shared config, clients, email, helpers, data
+│   └── data/
+│       └── watchlist.csv
 ├── agents/
-│   └── earnings_agent/           # earnings-specific logic, docs, and data
-│       └── data/
-│           ├── watchlist.csv
-│           └── email_preview.html
+│   ├── earnings_agent/           # earnings-specific logic, docs, and data
+│   │   └── data/
+│   │       └── email_preview.html
+│   └── ratings_agent/            # analyst rating-change logic, docs, and state
+│       └── data/                 # price_targets.snapshot.json (gitignored)
 ├── env.example
 └── .github/workflows/
 ```
@@ -29,6 +32,9 @@ Agents/
 
 - `agents/earnings_agent`  
   Detailed docs: [`agents/earnings_agent/README.md`](agents/earnings_agent/README.md)
+- `agents/ratings_agent`  
+  Alerts on analyst rating-consensus and price-target changes.
+  Detailed docs: [`agents/ratings_agent/README.md`](agents/ratings_agent/README.md)
 
 ## Add A New Agent
 
@@ -43,8 +49,9 @@ Agents/
 
 ## Quick Start
 
-Current runnable agent:
+Current runnable agents:
 
 ```bash
 python -m agents.earnings_agent.main
+python -m agents.ratings_agent.main
 ```

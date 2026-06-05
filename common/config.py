@@ -58,7 +58,7 @@ def get_settings() -> Settings:
         smtp_user=smtp_user or "",
         smtp_pass=smtp_pass or "",
         email_to=email_to or "",
-        watchlist_csv=os.getenv("WATCHLIST_CSV", "./agents/earnings_agent/data/watchlist.csv"),
+        watchlist_csv=os.getenv("WATCHLIST_CSV", "./common/data/watchlist.csv"),
         ratings_pt_snapshot=os.getenv(
             "RATINGS_PT_SNAPSHOT", "./agents/ratings_agent/data/price_targets.snapshot.json"
         ),
