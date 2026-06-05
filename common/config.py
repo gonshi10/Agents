@@ -28,6 +28,7 @@ class Settings:
     smtp_pass: str
     email_to: str
     watchlist_csv: str
+    ratings_pt_snapshot: str
     test_mode: bool
 
 
@@ -58,6 +59,9 @@ def get_settings() -> Settings:
         smtp_pass=smtp_pass or "",
         email_to=email_to or "",
         watchlist_csv=os.getenv("WATCHLIST_CSV", "./agents/earnings_agent/data/watchlist.csv"),
+        ratings_pt_snapshot=os.getenv(
+            "RATINGS_PT_SNAPSHOT", "./agents/ratings_agent/data/price_targets.snapshot.json"
+        ),
         test_mode=_as_bool(os.getenv("TEST_MODE"), default=False),
     )
 

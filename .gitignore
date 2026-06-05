@@ -206,5 +206,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Agent runtime state snapshots (e.g. ratings price-target baselines)
+agents/*/data/*.snapshot.json
+
 # Claude Code — keep shared config tracked, ignore personal/local overrides
 .claude/settings.local.json

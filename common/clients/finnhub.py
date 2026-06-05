@@ -103,3 +103,22 @@ class FinnhubClient:
             print(f"⚠️ Failed to fetch stock profile for {ticker}: {exc}")
             return {}
 
+    def get_recommendation_trends(self, ticker: str) -> list[dict[str, Any]]:
+        try:
+            data = self._get("stock/recommendation", {"symbol": ticker})
+            if not isinstance(data, list):
+                return []
+            # Finnhub returns monthly trend dicts; sort newest-first by period.
+            return sorted(data, key=lambda item: str(item.get("period", "")), reverse=True)
+        except Exception as exc:
+            print(f"⚠️ Failed to fetch recommendation trends for {ticker}: {exc}")
+            return []
+
+    def get_price_target(self, ticker: str) -> dict[str, Any]:
+        try:
+            data = self._get("stock/price-target", {"symbol": ticker})
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:
+            print(f"⚠️ Failed to fetch price target for {ticker}: {exc}")
+            return {}
+

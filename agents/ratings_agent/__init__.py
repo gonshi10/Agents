@@ -1,0 +1,1 @@
+"""Analyst ratings agent package."""

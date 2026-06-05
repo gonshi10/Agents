@@ -3,6 +3,7 @@
   "permissions": {
     "allow": [
       "Bash(python -m agents.earnings_agent.tests.test_agent)",
+      "Bash(python -m agents.ratings_agent.tests.test_agent)",
       "Bash(git status)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
