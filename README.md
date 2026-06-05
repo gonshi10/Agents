@@ -15,8 +15,10 @@ Agents/
 │   ├── earnings_agent/           # earnings-specific logic, docs, and data
 │   │   └── data/
 │   │       └── email_preview.html
-│   └── ratings_agent/            # analyst rating-change logic, docs, and state
-│       └── data/                 # price_targets.snapshot.json (gitignored)
+│   ├── ratings_agent/            # analyst rating-change logic, docs, and state
+│   │   └── data/                 # price_targets.snapshot.json (gitignored)
+│   └── flights_agent/            # flight price-drop watcher, docs, and state
+│       └── data/                 # routes.csv + prices.snapshot.json (gitignored)
 ├── env.example
 └── .github/workflows/
 ```
@@ -35,6 +37,9 @@ Agents/
 - `agents/ratings_agent`  
   Alerts on analyst rating-consensus and price-target changes.
   Detailed docs: [`agents/ratings_agent/README.md`](agents/ratings_agent/README.md)
+- `agents/flights_agent`  
+  Watches a watchlist of flight routes and emails a digest on price drops or target-price hits.
+  Detailed docs: [`agents/flights_agent/README.md`](agents/flights_agent/README.md)
 
 ## Add A New Agent
 
@@ -54,4 +59,5 @@ Current runnable agents:
 ```bash
 python -m agents.earnings_agent.main
 python -m agents.ratings_agent.main
+python -m agents.flights_agent.main
 ```

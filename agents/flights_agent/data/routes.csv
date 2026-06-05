@@ -1,0 +1,3 @@
+Origin,Destination,DepartMonth,ReturnMonth,MaxPrice,OneWay
+TLV,JFK,2026-09,2026-09,650,false
+TLV,LON,2026-08,,200,true

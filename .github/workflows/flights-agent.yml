@@ -1,0 +1,55 @@
+name: Flights Agent
+
+on:
+  schedule:
+    # Midnight ET is 04:00 UTC during EDT and 05:00 UTC during EST.
+    - cron: "0 5 * * *"   # hits midnight during EST
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # GitHub Actions runners are ephemeral, so persist the fare snapshot across
+      # runs. The key rotates per run; restore-keys grabs the latest prior
+      # snapshot so each run compares against the previous one. (Price-drop alerts
+      # therefore begin on a route's second run; target-price alerts on the first.)
+      - name: Restore price snapshot
+        uses: actions/cache@v4
+        with:
+          path: agents/flights_agent/data/prices.snapshot.json
+          key: flights-price-snapshot-${{ github.run_id }}
+          restore-keys: |
+            flights-price-snapshot-
+
+      - name: Run flights agent
+        env:
+          # Required by get_settings() (Finnhub is unused by this agent but still required)
+          FINNHUB_API_KEY:        ${{ secrets.FINNHUB_API_KEY }}
+          SMTP_HOST:              ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:              ${{ secrets.SMTP_PORT }}
+          SMTP_USER:              ${{ secrets.SMTP_USER }}
+          SMTP_PASS:              ${{ secrets.SMTP_PASS }}
+          EMAIL_TO:               ${{ secrets.EMAIL_TO }}
+          OPENAI_API_KEY:         ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL:           ${{ secrets.OPENAI_MODEL }}
+          # Flights-agent-specific
+          FLIGHTS_API_TOKEN:      ${{ secrets.FLIGHTS_API_TOKEN }}
+          FLIGHTS_WATCHLIST_CSV:  ./agents/flights_agent/data/routes.csv
+          FLIGHTS_PRICE_SNAPSHOT: ./agents/flights_agent/data/prices.snapshot.json
+        run: |
+          python -m agents.flights_agent.main

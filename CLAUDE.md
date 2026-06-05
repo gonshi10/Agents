@@ -24,6 +24,12 @@ python -m agents.ratings_agent.main
 
 # Ratings agent smoke test (also runs offline change-detection checks)
 python -m agents.ratings_agent.tests.test_agent
+
+# Run the flights agent (from repo root; needs a populated .env)
+python -m agents.flights_agent.main
+
+# Flights agent smoke test (offline route-parsing + change-detection checks)
+python -m agents.flights_agent.tests.test_agent
 ```
 
 There is no linter or pytest configured. Tests are standalone scripts with a `main()` that returns an exit code; they do not use a test framework, so run them as modules (not `pytest`).
@@ -36,11 +42,12 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 
 ### Layout
 - `common/config.py` — single `Settings` dataclass loaded once via `get_settings()` (`lru_cache`). All env access goes through here; agents never call `os.getenv` directly.
-- `common/clients/` — API wrappers (`FinnhubClient`, `OpenAIClient`), each with its own built-in rate limiting.
+- `common/clients/` — API wrappers (`FinnhubClient`, `OpenAIClient`, `TravelpayoutsClient`), each with its own built-in rate limiting.
 - `common/email/sender.py` — `EmailSender`, SMTP multipart (plain + HTML).
-- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the watchlist CSV (shared default `common/data/watchlist.csv`).
+- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the stock watchlist CSV (shared default `common/data/watchlist.csv`); `load_routes()` reads flight-route rows (`Origin,Destination,DepartMonth` + optional `ReturnMonth,MaxPrice,OneWay`) for the flights agent.
 - `agents/earnings_agent/` — `agent.py` holds `EarningsAgent`; `prompts.py` holds the LLM templates; `main.py`/`__main__.py` are the entrypoints.
 - `agents/ratings_agent/` — `agent.py` holds `RatingsAgent` (analyst rating-change alerts); same `prompts.py`/`main.py`/`__main__.py` layout.
+- `agents/flights_agent/` — `agent.py` holds `FlightsAgent` (flight price-drop watcher); same `prompts.py`/`main.py`/`__main__.py` layout. Does not use Finnhub.
 
 ### Earnings agent flow (`EarningsAgent.run`)
 1. Compute `target_date` — yesterday normally, 3 days ago when `TEST_MODE=true` (wider window so local runs find data).
@@ -54,6 +61,11 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 3. **Price-target change is stateful** — compare the current mean target against a JSON snapshot (`RATINGS_PT_SNAPSHOT`) of last-seen targets; the snapshot is rewritten every run (baselines for untouched tickers carried forward). In CI the snapshot survives ephemeral runners via `actions/cache`, so a ticker's price-target alerts begin on its second run.
 4. Only changed tickers get AI insights (batched, with per-ticker fallback) and one email each. The ratings parser uses a `RATING RATIONALE` header where earnings uses `STRATEGIC ANALYSIS` — each agent owns its own `parse_structured_insights`.
 
+### Flights agent flow (`FlightsAgent.run`)
+1. Load routes via `load_routes()`; for each, fetch the current cheapest fare from the Travelpayouts/Aviasales Data API (`TravelpayoutsClient.get_cheapest_fare`, whole-month `YYYY-MM` cheapest).
+2. **Two triggers** (`detect_change`, a pure function): a *target-price* hit (fare ≤ the route's `MaxPrice`, stateless) **or** a *price drop* of ≥ `FLIGHTS_PRICE_DROP_PCT` vs the last-seen fare. The drop side is **stateful** — last-seen fares are persisted to a JSON snapshot (`FLIGHTS_PRICE_SNAPSHOT`), rewritten every run with untouched baselines carried forward; in CI `actions/cache` persists it, so price-drop alerts begin on a route's second run (target-price alerts work on the first).
+3. Triggered routes get AI insights (batched, per-route fallback) and are sent as **one consolidated digest email** (not one per route). Flights uses `DEAL SUMMARY`/`PRICE CONTEXT`/`BOOKING TIP` headers — its own `parse_structured_insights`.
+
 ### Key design points
 - **AI is optional.** When `OPENAI_API_KEY` is unset, `OpenAIClient.is_enabled` is `False` and the agent still runs with non-AI fallback text. Guard any new OpenAI use behind `is_enabled`.
 - **Rate limiting is client-side and stateful.** `FinnhubClient` (50/min) and `OpenAIClient` (3/min) self-throttle with `time.sleep`. `generate_individual_insights` also sleeps 10–15s between tickers. Long runtimes are expected by design.
@@ -62,7 +74,7 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 - **Failures are swallowed, not raised.** Client methods catch exceptions, print a message, and return empty/`None`; callers check for falsy results. Preserve this so one bad ticker doesn't abort the run.
 
 ### Automation
-`.github/workflows/earnings-agent.yml` and `.github/workflows/ratings-agent.yml` run their agents daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings workflow adds an `actions/cache` step to persist the price-target snapshot between runs.
+`.github/workflows/earnings-agent.yml`, `.github/workflows/ratings-agent.yml`, and `.github/workflows/flights-agent.yml` run their agents daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings and flights workflows each add an `actions/cache` step to persist their snapshot (price targets / fares) between runs. Note: `get_settings()` requires `FINNHUB_API_KEY` for all agents, so the flights workflow still needs that secret even though the flights agent doesn't call Finnhub.
 
 ## Adding a new agent
 Create `agents/<new_agent>/` with `agent.py`, `prompts.py`, `main.py`, and `README.md`; reuse `common/` modules; add a workflow under `.github/workflows/` if it needs scheduling. The `scaffold-new-agent` skill (see below) automates this scaffold.

@@ -29,6 +29,11 @@ class Settings:
     email_to: str
     watchlist_csv: str
     ratings_pt_snapshot: str
+    flights_api_token: str | None
+    flights_watchlist_csv: str
+    flights_price_snapshot: str
+    flights_price_drop_pct: float
+    flights_currency: str
     test_mode: bool
 
 
@@ -62,6 +67,18 @@ def get_settings() -> Settings:
         ratings_pt_snapshot=os.getenv(
             "RATINGS_PT_SNAPSHOT", "./agents/ratings_agent/data/price_targets.snapshot.json"
         ),
+        # Flights agent. FLIGHTS_API_TOKEN is intentionally optional here (not in the
+        # required set above) so earnings/ratings runs don't break when it is unset;
+        # FlightsAgent validates its presence and degrades gracefully.
+        flights_api_token=os.getenv("FLIGHTS_API_TOKEN"),
+        flights_watchlist_csv=os.getenv(
+            "FLIGHTS_WATCHLIST_CSV", "./agents/flights_agent/data/routes.csv"
+        ),
+        flights_price_snapshot=os.getenv(
+            "FLIGHTS_PRICE_SNAPSHOT", "./agents/flights_agent/data/prices.snapshot.json"
+        ),
+        flights_price_drop_pct=float(os.getenv("FLIGHTS_PRICE_DROP_PCT", "10")),
+        flights_currency=os.getenv("FLIGHTS_CURRENCY", "usd"),
         test_mode=_as_bool(os.getenv("TEST_MODE"), default=False),
     )
 
