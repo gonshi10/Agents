@@ -1,0 +1,56 @@
+name: Techstack Agent
+
+on:
+  schedule:
+    # Midnight ET is 04:00 UTC during EDT and 05:00 UTC during EST.
+    - cron: "0 5 * * *"   # hits midnight during EST
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Persist technology snapshots across ephemeral runners so trend detection
+      # compares against the previous run.
+      - name: Restore tech snapshot
+        uses: actions/cache@v4
+        with:
+          path: agents/techstack_agent/data/tech_mentions.snapshot.json
+          key: techstack-snapshot-${{ github.run_id }}
+          restore-keys: |
+            techstack-snapshot-
+
+      - name: Run techstack agent
+        env:
+          # Required by get_settings()
+          FINNHUB_API_KEY:           ${{ secrets.FINNHUB_API_KEY }}
+          SMTP_HOST:                 ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:                 ${{ secrets.SMTP_PORT }}
+          SMTP_USER:                 ${{ secrets.SMTP_USER }}
+          SMTP_PASS:                 ${{ secrets.SMTP_PASS }}
+          EMAIL_TO:                  ${{ secrets.EMAIL_TO }}
+          OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL:              ${{ secrets.OPENAI_MODEL }}
+          # Techstack-agent-specific
+          ADZUNA_APP_ID:             ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY:            ${{ secrets.ADZUNA_APP_KEY }}
+          TECHSTACK_WATCHLIST_CSV:   ./agents/techstack_agent/data/companies.csv
+          TECHSTACK_SNAPSHOT:        ./agents/techstack_agent/data/tech_mentions.snapshot.json
+          TECHSTACK_TREND_THRESHOLD: "20"
+        run: |
+          python -m agents.techstack_agent.main
+

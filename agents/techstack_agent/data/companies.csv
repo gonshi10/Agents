@@ -1,0 +1,204 @@
+Company,Ticker,SearchQuery,Sector
+Apple,AAPL,Apple software engineer,Technology
+Microsoft,MSFT,Microsoft software engineer,Technology
+NVIDIA,NVDA,NVIDIA machine learning engineer,Semiconductors
+Cloudflare,NET,Cloudflare distributed systems engineer,Cloud
+Stripe,,Stripe backend engineer,Fintech
+Anthropic,,Anthropic machine learning engineer,AI
+Alphabet Inc. (Class A),GOOGL,Alphabet . (Class A) software engineer,Communication Services
+Alphabet Inc. (Class C),GOOG,Alphabet . (Class C) software engineer,Communication Services
+Amazon,AMZN,Amazon software engineer,Consumer Discretionary
+Broadcom,AVGO,Broadcom software engineer,Information Technology
+Meta Platforms,META,Meta Platforms software engineer,Communication Services
+"Tesla, Inc.",TSLA,Tesla software engineer,Consumer Discretionary
+Lilly (Eli),LLY,Lilly (Eli) software engineer,Health Care
+Micron Technology,MU,Micron Technology software engineer,Information Technology
+Walmart,WMT,Walmart software engineer,Consumer Staples
+JPMorgan Chase,JPM,JPMorgan Chase software engineer,Financials
+Advanced Micro Devices,AMD,Advanced Micro Devices software engineer,Information Technology
+ExxonMobil,XOM,ExxonMobil software engineer,Energy
+Visa Inc.,V,Visa software engineer,Financials
+Oracle Corporation,ORCL,Oracle software engineer,Information Technology
+Johnson & Johnson,JNJ,Johnson & Johnson software engineer,Health Care
+Intel,INTC,Intel software engineer,Information Technology
+Cisco,CSCO,Cisco software engineer,Information Technology
+Mastercard,MA,Mastercard software engineer,Financials
+Costco,COST,Costco software engineer,Consumer Staples
+Caterpillar Inc.,CAT,Caterpillar software engineer,Industrials
+AbbVie,ABBV,AbbVie software engineer,Health Care
+Bank of America,BAC,Bank of America software engineer,Financials
+Lam Research,LRCX,Lam Research software engineer,Information Technology
+Chevron Corporation,CVX,Chevron software engineer,Energy
+UnitedHealth Group,UNH,UnitedHealth Group software engineer,Health Care
+Applied Materials,AMAT,Applied Materials software engineer,Information Technology
+Netflix,NFLX,Netflix software engineer,Communication Services
+GE Aerospace,GE,GE Aerospace software engineer,Industrials
+Coca-Cola Company (The),KO,Coca-Cola Company (The) software engineer,Consumer Staples
+Procter & Gamble,PG,Procter & Gamble software engineer,Consumer Staples
+Morgan Stanley,MS,Morgan Stanley software engineer,Financials
+Palantir Technologies,PLTR,Palantir Technologies software engineer,Information Technology
+Home Depot (The),HD,Home Depot (The) software engineer,Consumer Discretionary
+Goldman Sachs,GS,Goldman Sachs software engineer,Financials
+Merck & Co.,MRK,Merck & Co software engineer,Health Care
+Philip Morris International,PM,Philip Morris International software engineer,Consumer Staples
+IBM,IBM,IBM software engineer,Information Technology
+Texas Instruments,TXN,Texas Instruments software engineer,Information Technology
+Dell Technologies,DELL,Dell Technologies software engineer,Information Technology
+KLA Corporation,KLAC,KLA software engineer,Information Technology
+GE Vernova,GEV,GE Vernova software engineer,Industrials
+Wells Fargo,WFC,Wells Fargo software engineer,Financials
+RTX Corporation,RTX,RTX software engineer,Industrials
+Linde plc,LIN,Linde plc software engineer,Materials
+Qualcomm,QCOM,Qualcomm software engineer,Information Technology
+Citigroup,C,Citigroup software engineer,Financials
+Palo Alto Networks,PANW,Palo Alto Networks software engineer,Information Technology
+American Express,AXP,American Express software engineer,Financials
+McDonald's,MCD,McDonald's software engineer,Consumer Discretionary
+Analog Devices,ADI,Analog Devices software engineer,Information Technology
+Arista Networks,ANET,Arista Networks software engineer,Information Technology
+PepsiCo,PEP,PepsiCo software engineer,Consumer Staples
+T-Mobile US,TMUS,T-Mobile US software engineer,Communication Services
+Seagate Technology,STX,Seagate Technology software engineer,Information Technology
+Verizon,VZ,Verizon software engineer,Communication Services
+Amgen,AMGN,Amgen software engineer,Health Care
+NextEra Energy,NEE,NextEra Energy software engineer,Utilities
+TJX Companies,TJX,TJX Companies software engineer,Consumer Discretionary
+Western Digital,WDC,Western Digital software engineer,Information Technology
+Thermo Fisher Scientific,TMO,Thermo Fisher Scientific software engineer,Health Care
+Walt Disney Company (The),DIS,Walt Disney Company (The) software engineer,Communication Services
+CrowdStrike,CRWD,CrowdStrike software engineer,Information Technology
+Amphenol,APH,Amphenol software engineer,Information Technology
+Boeing,BA,Boeing software engineer,Industrials
+BlackRock,BLK,BlackRock software engineer,Financials
+Union Pacific Corporation,UNP,Union Pacific software engineer,Industrials
+Gilead Sciences,GILD,Gilead Sciences software engineer,Health Care
+Abbott Laboratories,ABT,Abbott Laboratories software engineer,Health Care
+AT&T,T,AT&T software engineer,Communication Services
+Deere & Company,DE,Deere & Company software engineer,Industrials
+Charles Schwab Corporation,SCHW,Charles Schwab software engineer,Financials
+Eaton Corporation,ETN,Eaton software engineer,Industrials
+Corning Inc.,GLW,Corning software engineer,Information Technology
+Salesforce,CRM,Salesforce software engineer,Information Technology
+Intuitive Surgical,ISRG,Intuitive Surgical software engineer,Health Care
+Pfizer,PFE,Pfizer software engineer,Health Care
+Welltower,WELL,Welltower software engineer,Real Estate
+Uber,UBER,Uber software engineer,Industrials
+ConocoPhillips,COP,ConocoPhillips software engineer,Energy
+Blackstone Inc.,BX,Blackstone software engineer,Financials
+Honeywell,HON,Honeywell software engineer,Industrials
+Prologis,PLD,Prologis software engineer,Real Estate
+Danaher Corporation,DHR,Danaher software engineer,Health Care
+Booking Holdings,BKNG,Booking Holdings software engineer,Consumer Discretionary
+Chubb Limited,CB,Chubb Limited software engineer,Financials
+S&P Global,SPGI,S&P Global software engineer,Financials
+CVS Health,CVS,CVS Health software engineer,Health Care
+Lockheed Martin,LMT,Lockheed Martin software engineer,Industrials
+Altria,MO,Altria software engineer,Consumer Staples
+Progressive Corporation,PGR,Progressive software engineer,Financials
+Lowe's,LOW,Lowe's software engineer,Consumer Discretionary
+Stryker Corporation,SYK,Stryker software engineer,Health Care
+Bristol Myers Squibb,BMY,Bristol Myers Squibb software engineer,Health Care
+ServiceNow,NOW,ServiceNow software engineer,Information Technology
+Vertex Pharmaceuticals,VRTX,Vertex Pharmaceuticals software engineer,Health Care
+Capital One,COF,Capital One software engineer,Financials
+Parker Hannifin,PH,Parker Hannifin software engineer,Industrials
+Accenture,ACN,Accenture software engineer,Information Technology
+Starbucks,SBUX,Starbucks software engineer,Consumer Discretionary
+Equinix,EQIX,Equinix software engineer,Real Estate
+Newmont,NEM,Newmont software engineer,Materials
+Fortinet,FTNT,Fortinet software engineer,Information Technology
+Medtronic,MDT,Medtronic software engineer,Health Care
+Southern Company,SO,Southern Company software engineer,Utilities
+Quanta Services,PWR,Quanta Services software engineer,Industrials
+Cadence Design Systems,CDNS,Cadence Design Systems software engineer,Information Technology
+Marriott International,MAR,Marriott International software engineer,Consumer Discretionary
+Adobe Inc.,ADBE,Adobe software engineer,Information Technology
+Trane Technologies,TT,Trane Technologies software engineer,Industrials
+Howmet Aerospace,HWM,Howmet Aerospace software engineer,Industrials
+Duke Energy,DUK,Duke Energy software engineer,Utilities
+General Dynamics,GD,General Dynamics software engineer,Industrials
+McKesson Corporation,MCK,McKesson software engineer,Health Care
+CME Group,CME,CME Group software engineer,Financials
+Automatic Data Processing,ADP,Automatic Data Processing software engineer,Industrials
+United Parcel Service,UPS,United Parcel Service software engineer,Industrials
+PNC Financial Services,PNC,PNC Financial Services software engineer,Financials
+Freeport-McMoRan,FCX,Freeport-McMoRan software engineer,Materials
+Constellation Energy,CEG,Constellation Energy software engineer,Utilities
+American Tower,AMT,American Tower software engineer,Real Estate
+Elevance Health,ELV,Elevance Health software engineer,Health Care
+Cummins,CMI,Cummins software engineer,Industrials
+Synopsys,SNPS,Synopsys software engineer,Information Technology
+Waste Management,WM,Waste Management software engineer,Industrials
+Williams Companies,WMB,Williams Companies software engineer,Energy
+Johnson Controls,JCI,Johnson Controls software engineer,Industrials
+Monster Beverage,MNST,Monster Beverage software engineer,Consumer Staples
+CSX Corporation,CSX,CSX software engineer,Industrials
+KKR & Co.,KKR,KKR & Co software engineer,Financials
+U.S. Bancorp,USB,U.S. Bancorp software engineer,Financials
+Comcast,CMCSA,Comcast software engineer,Communication Services
+HCA Healthcare,HCA,HCA Healthcare software engineer,Health Care
+Schlumberger,SLB,Schlumberger software engineer,Energy
+Intuit,INTU,Intuit software engineer,Information Technology
+3M,MMM,3M software engineer,Industrials
+Intercontinental Exchange,ICE,Intercontinental Exchange software engineer,Financials
+Simon Property Group,SPG,Simon Property Group software engineer,Real Estate
+Mondelez International,MDLZ,Mondelez International software engineer,Consumer Staples
+Airbnb,ABNB,Airbnb software engineer,Consumer Discretionary
+FedEx,FDX,FedEx software engineer,Industrials
+Moody's Corporation,MCO,Moody's software engineer,Financials
+Hilton Worldwide,HLT,Hilton Worldwide software engineer,Consumer Discretionary
+Emerson Electric,EMR,Emerson Electric software engineer,Industrials
+Northrop Grumman,NOC,Northrop Grumman software engineer,Industrials
+Cigna,CI,Cigna software engineer,Health Care
+Marathon Petroleum,MPC,Marathon Petroleum software engineer,Energy
+Valero Energy,VLO,Valero Energy software engineer,Energy
+Sherwin-Williams,SHW,Sherwin-Williams software engineer,Materials
+Royal Caribbean Group,RCL,Royal Caribbean Group software engineer,Consumer Discretionary
+O’Reilly Automotive,ORLY,O’Reilly Automotive software engineer,Consumer Discretionary
+NXP Semiconductors,NXPI,NXP Semiconductors software engineer,Information Technology
+General Motors,GM,General Motors software engineer,Consumer Discretionary
+Ross Stores,ROST,Ross Stores software engineer,Consumer Discretionary
+Phillips 66,PSX,Phillips 66 software engineer,Energy
+EOG Resources,EOG,EOG Resources software engineer,Energy
+Monolithic Power Systems,MPWR,Monolithic Power Systems software engineer,Information Technology
+Illinois Tool Works,ITW,Illinois Tool Works software engineer,Industrials
+Ecolab,ECL,Ecolab software engineer,Materials
+Boston Scientific,BSX,Boston Scientific software engineer,Health Care
+Cintas,CTAS,Cintas software engineer,Industrials
+Colgate-Palmolive,CL,Colgate-Palmolive software engineer,Consumer Staples
+Kinder Morgan,KMI,Kinder Morgan software engineer,Energy
+Norfolk Southern,NSC,Norfolk Southern software engineer,Industrials
+American Electric Power,AEP,American Electric Power software engineer,Utilities
+Aon plc,AON,Aon plc software engineer,Financials
+TransDigm Group,TDG,TransDigm Group software engineer,Industrials
+Motorola Solutions,MSI,Motorola Solutions software engineer,Information Technology
+United Rentals,URI,United Rentals software engineer,Industrials
+Digital Realty,DLR,Digital Realty software engineer,Real Estate
+Regeneron Pharmaceuticals,REGN,Regeneron Pharmaceuticals software engineer,Health Care
+Warner Bros. Discovery,WBD,Warner Bros. Discovery software engineer,Communication Services
+Hewlett Packard Enterprise,HPE,Hewlett Packard Enterprise software engineer,Information Technology
+Republic Services,RSG,Republic Services software engineer,Industrials
+Travelers Companies (The),TRV,Travelers Companies (The) software engineer,Financials
+"Nike, Inc.",NKE,Nike software engineer,Consumer Discretionary
+Air Products,APD,Air Products software engineer,Materials
+Baker Hughes,BKR,Baker Hughes software engineer,Energy
+TE Connectivity,TEL,TE Connectivity software engineer,Information Technology
+Paccar,PCAR,Paccar software engineer,Industrials
+W. W. Grainger,GWW,W. W. Grainger software engineer,Industrials
+Truist Financial,TFC,Truist Financial software engineer,Financials
+Aflac,AFL,Aflac software engineer,Financials
+Sempra,SRE,Sempra software engineer,Utilities
+Ford Motor Company,F,Ford Motor Company software engineer,Consumer Discretionary
+Dominion Energy,D,Dominion Energy software engineer,Utilities
+Nucor,NUE,Nucor software engineer,Materials
+L3Harris,LHX,L3Harris software engineer,Industrials
+Allstate,ALL,Allstate software engineer,Financials
+Realty Income,O,Realty Income software engineer,Real Estate
+Targa Resources,TRGP,Targa Resources software engineer,Energy
+Occidental Petroleum,OXY,Occidental Petroleum software engineer,Energy
+Keysight Technologies,KEYS,Keysight Technologies software engineer,Information Technology
+Teradyne,TER,Teradyne software engineer,Information Technology
+Carrier Global,CARR,Carrier Global software engineer,Industrials
+Target Corporation,TGT,Target software engineer,Consumer Staples
+Oneok,OKE,Oneok software engineer,Energy
+Arthur J. Gallagher & Co.,AJG,Arthur J. Gallagher & Co software engineer,Financials
