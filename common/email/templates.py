@@ -1,0 +1,149 @@
+"""Email-client-safe HTML building blocks shared by all agents.
+
+Agents compose these pure functions instead of hand-rolling inline HTML so every
+notification email gets the same clean, readable look. The constraints below are
+not stylistic preferences — they are what real inboxes (Gmail, Outlook) actually
+render:
+
+- **All CSS is inline** (``style="..."`` on each element). Gmail strips ``<head>``
+  and ``<style>`` blocks, so classes/stylesheets silently vanish.
+- **Layout uses ``<table>``**, never ``flex``/``grid`` — Outlook renders with the
+  Word engine and ignores modern layout.
+- Web-safe properties only (``background-color``, ``border``, ``padding``,
+  ``border-radius``, ``color``, ``font-size``, ``font-weight``). Gradients and
+  shadows are avoided as load-bearing styling.
+- Single centered column, ~600px wide.
+- **Dynamic text must be escaped** with :func:`esc` before interpolation.
+
+These functions only build the HTML body. The plain-text alternative and the
+actual sending stay with each agent / :class:`common.email.sender.EmailSender`.
+"""
+
+from __future__ import annotations
+
+import html
+
+# ----- palette (single source of truth for the look) -----
+
+ACCENT = "#2c3e50"
+BG = "#f4f5f7"
+CARD = "#ffffff"
+BORDER = "#e3e6ea"
+TEXT = "#222222"
+MUTED = "#6c757d"
+
+UP_FG, UP_BG = "#0f5132", "#d1e7dd"
+DOWN_FG, DOWN_BG = "#842029", "#f8d7da"
+NEUTRAL_FG, NEUTRAL_BG = "#383d41", "#e2e3e5"
+
+FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
+
+_BADGE_COLORS = {
+    "up": (UP_FG, UP_BG),
+    "down": (DOWN_FG, DOWN_BG),
+    "neutral": (NEUTRAL_FG, NEUTRAL_BG),
+}
+
+
+def esc(text: object) -> str:
+    """Escape dynamic content for safe interpolation into HTML."""
+    return html.escape(str(text), quote=False)
+
+
+def header(title: str, subtitle: str = "") -> str:
+    """Accent header bar with a title and optional subtitle."""
+    sub = (
+        f'<div style="margin:6px 0 0 0;font-size:14px;color:#dfe3e8;">{esc(subtitle)}</div>'
+        if subtitle
+        else ""
+    )
+    return (
+        f'<div style="background-color:{ACCENT};color:#ffffff;'
+        f'padding:24px 28px;border-radius:10px;margin-bottom:20px;">'
+        f'<div style="font-size:22px;font-weight:600;">{esc(title)}</div>'
+        f"{sub}</div>"
+    )
+
+
+def card(body: str, title: str = "") -> str:
+    """White rounded card with a subtle border. ``body`` is raw HTML (already built)."""
+    heading = (
+        f'<div style="font-size:16px;font-weight:600;color:{ACCENT};'
+        f'margin:0 0 12px 0;">{esc(title)}</div>'
+        if title
+        else ""
+    )
+    return (
+        f'<div style="background-color:{CARD};border:1px solid {BORDER};'
+        f'border-radius:10px;padding:20px 22px;margin-bottom:16px;">'
+        f"{heading}{body}</div>"
+    )
+
+
+def section(label: str, text: str) -> str:
+    """Bold label followed by a paragraph — for AI-insight subsections."""
+    return (
+        f'<div style="margin:0 0 14px 0;">'
+        f'<div style="font-size:13px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:0.4px;color:{MUTED};margin:0 0 4px 0;">{esc(label)}</div>'
+        f'<div style="font-size:15px;line-height:1.6;color:{TEXT};">{esc(text)}</div>'
+        f"</div>"
+    )
+
+
+def key_value(label: str, value: str) -> str:
+    """Inline ``label: value`` row."""
+    return (
+        f'<div style="font-size:15px;line-height:1.6;color:{TEXT};margin:0 0 6px 0;">'
+        f'<span style="color:{MUTED};">{esc(label)}:</span> '
+        f"<strong>{esc(value)}</strong></div>"
+    )
+
+
+def badge(text: str, kind: str = "neutral") -> str:
+    """Colored pill. ``kind`` is ``"up"`` (green), ``"down"`` (red), or ``"neutral"`` (grey)."""
+    fg, bg = _BADGE_COLORS.get(kind, _BADGE_COLORS["neutral"])
+    return (
+        f'<span style="display:inline-block;background-color:{bg};color:{fg};'
+        f'padding:5px 12px;border-radius:14px;font-size:13px;font-weight:600;'
+        f'margin:2px 6px 2px 0;">{esc(text)}</span>'
+    )
+
+
+def link_button(text: str, url: str) -> str:
+    """Accent call-to-action button (a styled anchor — buttons aren't email-safe)."""
+    return (
+        f'<a href="{esc(url)}" style="display:inline-block;background-color:{ACCENT};'
+        f'color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;'
+        f'font-size:14px;font-weight:600;margin-top:6px;">{esc(text)}</a>'
+    )
+
+
+def footer(text: str) -> str:
+    """Muted, centered fine print."""
+    return (
+        f'<div style="text-align:center;color:{MUTED};font-size:12px;'
+        f'margin-top:8px;padding:4px;">{esc(text)}</div>'
+    )
+
+
+def page(title: str, blocks: list[str]) -> str:
+    """Wrap ``blocks`` in a full, centered 600px email document.
+
+    ``title`` becomes the ``<title>`` (mostly for clients that show it); use
+    :func:`header` inside ``blocks`` for the visible heading.
+    """
+    inner = "".join(blocks)
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n'
+        '<head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        f"<title>{esc(title)}</title></head>\n"
+        f'<body style="margin:0;padding:0;background-color:{BG};">'
+        f'<table role="presentation" align="center" width="600" cellpadding="0" '
+        f'cellspacing="0" style="width:600px;max-width:600px;margin:0 auto;">'
+        "<tr><td style=\"padding:24px 16px;font-family:" + FONT + ';">'
+        f"{inner}"
+        "</td></tr></table></body></html>"
+    )

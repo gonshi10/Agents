@@ -23,6 +23,7 @@ from typing import Any
 from common.clients.flights import TravelpayoutsClient
 from common.clients.openai_client import OpenAIClient
 from common.config import Settings
+from common.email import templates as et
 from common.email.sender import EmailSender
 from common.watchlist import load_routes
 
@@ -294,25 +295,23 @@ class FlightsAgent:
             booking_tip = ins.get("booking_tip", "")
             link = change.get("link") or ""
 
+            reason_badges = "".join(
+                et.badge(r, "up") for r in change.get("reasons", [])
+            )
+            meta = et.key_value("When", when) + et.key_value("Airline", airline)
+
             ai_html = ""
             if summary:
-                ai_html += f"<p>{summary}</p>"
+                ai_html += et.section("Deal Summary", summary)
             if price_context:
-                ai_html += f"<p><em>Price context:</em> {price_context}</p>"
+                ai_html += et.section("Price Context", price_context)
             if booking_tip:
-                ai_html += f"<p><strong>Tip:</strong> {booking_tip}</p>"
+                ai_html += et.section("Booking Tip", booking_tip)
 
-            book_link = (
-                f'<p><a href="{link}">Book on Aviasales</a></p>' if link else ""
-            )
+            book_link = et.link_button("Book on Aviasales", link) if link else ""
+            card_body = reason_badges + meta + ai_html + book_link
             html_cards.append(
-                f"""
-  <div style="border:1px solid #ddd; border-radius:8px; padding:12px 16px; margin:12px 0;">
-    <h3 style="margin:0 0 4px 0;">{route} — ${change['price']:.0f}</h3>
-    <p style="margin:0 0 8px 0; color:#555;">{when} · {airline} · <strong>{reasons}</strong></p>
-    {ai_html}
-    {book_link}
-  </div>"""
+                et.card(card_body, title=f"{route} — ${change['price']:.0f}")
             )
 
             plain_blocks.append(
@@ -325,18 +324,17 @@ class FlightsAgent:
             )
 
         generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        html_content = f"""
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #222;">
-  <h2>✈️ Flight Price Alerts</h2>
-  <p>{n} route{'s' if n != 1 else ''} worth a look:</p>
-  {''.join(html_cards)}
-  <hr />
-  <p style="color:#888;">Generated on {generated} · fares via Aviasales (last 48h)</p>
-</body>
-</html>
-"""
+        html_content = et.page(
+            "Flight Price Alerts",
+            [
+                et.header(
+                    "✈️ Flight Price Alerts",
+                    f"{n} route{'s' if n != 1 else ''} worth a look",
+                ),
+                *html_cards,
+                et.footer(f"Generated on {generated} · fares via Aviasales (last 48h)"),
+            ],
+        )
         plain_content = (
             "FLIGHT PRICE ALERTS\n===================\n\n"
             + "\n".join(plain_blocks)
