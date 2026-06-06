@@ -34,6 +34,11 @@ class Settings:
     flights_price_snapshot: str
     flights_price_drop_pct: float
     flights_currency: str
+    adzuna_app_id: str | None
+    adzuna_app_key: str | None
+    techstack_watchlist_csv: str
+    techstack_snapshot: str
+    techstack_trend_threshold: float
     test_mode: bool
 
 
@@ -79,6 +84,16 @@ def get_settings() -> Settings:
         ),
         flights_price_drop_pct=float(os.getenv("FLIGHTS_PRICE_DROP_PCT", "10")),
         flights_currency=os.getenv("FLIGHTS_CURRENCY", "usd"),
+        # Techstack agent. Adzuna credentials are optional so other agents are unaffected.
+        adzuna_app_id=os.getenv("ADZUNA_APP_ID"),
+        adzuna_app_key=os.getenv("ADZUNA_APP_KEY"),
+        techstack_watchlist_csv=os.getenv(
+            "TECHSTACK_WATCHLIST_CSV", "./agents/techstack_agent/data/companies.csv"
+        ),
+        techstack_snapshot=os.getenv(
+            "TECHSTACK_SNAPSHOT", "./agents/techstack_agent/data/tech_mentions.snapshot.json"
+        ),
+        techstack_trend_threshold=float(os.getenv("TECHSTACK_TREND_THRESHOLD", "20")),
         test_mode=_as_bool(os.getenv("TEST_MODE"), default=False),
     )
 

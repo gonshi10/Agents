@@ -78,3 +78,40 @@ def load_routes(csv_file: str) -> list[dict]:
     )
     return routes
 
+
+def load_companies(csv_file: str) -> list[dict]:
+    """Load tracked companies for the techstack agent.
+
+    Expected columns: Company, SearchQuery (required).
+    Optional columns: Ticker, Sector.
+    """
+    companies: list[dict] = []
+    try:
+        with open(csv_file, "r", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                company = str(row.get("Company", "")).strip()
+                search_query = str(row.get("SearchQuery", "")).strip()
+                if not (company and search_query):
+                    continue
+                ticker = str(row.get("Ticker", "")).strip().upper()
+                sector = str(row.get("Sector", "")).strip()
+                companies.append(
+                    {
+                        "company": company,
+                        "ticker": ticker or None,
+                        "search_query": search_query,
+                        "sector": sector or None,
+                    }
+                )
+    except Exception as exc:
+        print(f"✗ Failed to load companies from {csv_file}: {exc}")
+        return []
+
+    print(
+        f"✓ Loaded {len(companies)} companies: "
+        + ", ".join(c["company"] for c in companies[:5])
+        + ("..." if len(companies) > 5 else "")
+    )
+    return companies
+

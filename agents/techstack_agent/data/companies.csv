@@ -1,0 +1,8 @@
+Company,Ticker,SearchQuery,Sector
+Apple,AAPL,Apple software engineer,Technology
+Microsoft,MSFT,Microsoft software engineer,Technology
+NVIDIA,NVDA,NVIDIA machine learning engineer,Semiconductors
+Cloudflare,NET,Cloudflare distributed systems engineer,Cloud
+Stripe,,Stripe backend engineer,Fintech
+Anthropic,,Anthropic machine learning engineer,AI
+
