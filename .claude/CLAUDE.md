@@ -30,6 +30,12 @@ python -m agents.flights_agent.main
 
 # Flights agent smoke test (offline route-parsing + change-detection checks)
 python -m agents.flights_agent.tests.test_agent
+
+# Run the techstack agent (from repo root; needs a populated .env)
+python -m agents.techstack_agent.main
+
+# Techstack agent smoke test (offline parsing + trend-detection checks)
+python -m agents.techstack_agent.tests.test_agent
 ```
 
 There is no linter or pytest configured. Tests are standalone scripts with a `main()` that returns an exit code; they do not use a test framework, so run them as modules (not `pytest`).
@@ -42,12 +48,14 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 
 ### Layout
 - `common/config.py` — single `Settings` dataclass loaded once via `get_settings()` (`lru_cache`). All env access goes through here; agents never call `os.getenv` directly.
-- `common/clients/` — API wrappers (`FinnhubClient`, `OpenAIClient`, `TravelpayoutsClient`), each with its own built-in rate limiting.
+- `common/clients/` — API wrappers (`FinnhubClient`, `OpenAIClient`, `TravelpayoutsClient`, `AdzunaClient`), each with built-in rate limiting.
 - `common/email/sender.py` — `EmailSender`, SMTP multipart (plain + HTML).
-- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the stock watchlist CSV (shared default `common/data/watchlist.csv`); `load_routes()` reads flight-route rows (`Origin,Destination,DepartMonth` + optional `ReturnMonth,MaxPrice,OneWay`) for the flights agent.
+- `common/email/templates.py` — shared inline-styled, table-based HTML helpers and escaping (`et.esc`) for email-safe rendering.
+- `common/watchlist.py` — `load_tickers()` reads the `Symbol` column from the stock watchlist CSV (shared default `common/data/watchlist.csv`); `load_routes()` reads flight-route rows (`Origin,Destination,DepartMonth` + optional `ReturnMonth,MaxPrice,OneWay`) for the flights agent; `load_companies()` reads techstack rows (`Company,SearchQuery` required; optional `Ticker,Sector`).
 - `agents/earnings_agent/` — `agent.py` holds `EarningsAgent`; `prompts.py` holds the LLM templates; `main.py`/`__main__.py` are the entrypoints.
 - `agents/ratings_agent/` — `agent.py` holds `RatingsAgent` (analyst rating-change alerts); same `prompts.py`/`main.py`/`__main__.py` layout.
 - `agents/flights_agent/` — `agent.py` holds `FlightsAgent` (flight price-drop watcher); same `prompts.py`/`main.py`/`__main__.py` layout. Does not use Finnhub.
+- `agents/techstack_agent/` — `agent.py` holds `TechstackAgent` (job-posting technology trend watcher); same `prompts.py`/`main.py`/`__main__.py` layout. Uses Adzuna, not Finnhub.
 
 ### Earnings agent flow (`EarningsAgent.run`)
 1. Compute `target_date` — yesterday normally, 3 days ago when `TEST_MODE=true` (wider window so local runs find data).
@@ -66,6 +74,26 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 2. **Two triggers** (`detect_change`, a pure function): a *target-price* hit (fare ≤ the route's `MaxPrice`, stateless) **or** a *price drop* of ≥ `FLIGHTS_PRICE_DROP_PCT` vs the last-seen fare. The drop side is **stateful** — last-seen fares are persisted to a JSON snapshot (`FLIGHTS_PRICE_SNAPSHOT`), rewritten every run with untouched baselines carried forward; in CI `actions/cache` persists it, so price-drop alerts begin on a route's second run (target-price alerts work on the first).
 3. Triggered routes get AI insights (batched, per-route fallback) and are sent as **one consolidated digest email** (not one per route). Flights uses `DEAL SUMMARY`/`PRICE CONTEXT`/`BOOKING TIP` headers — its own `parse_structured_insights`.
 
+### Techstack agent flow (`TechstackAgent.run`)
+
+```mermaid
+flowchart TD
+    loadCompanies[load_companies CSV] --> fetchJobs[Adzuna get_job_postings]
+    fetchJobs --> extractMentions[extract_tech_mentions]
+    extractMentions --> detectCompany[detect_company_trends]
+    detectCompany --> saveSnapshot[rewrite TECHSTACK_SNAPSHOT]
+    detectCompany --> detectCross[detect_cross_company_trends]
+    detectCross --> aiInsights[generate_batched_ai_insights optional]
+    aiInsights --> sendDigest[send one digest email]
+```
+
+1. Load companies via `load_companies()` and fetch recent postings from Adzuna per `SearchQuery` (7 days normally, 30 days when `TEST_MODE=true`).
+2. Extract technology mentions from posting title/description using regex keyword sets, then compare current mention shares against the prior snapshot (`TECHSTACK_SNAPSHOT`).
+3. **Trend detection is stateful** — per company, classify each technology as `NEW`, `RISING`, or `FALLING` based on mention-share deltas and thresholds (`TECHSTACK_TREND_THRESHOLD`, default 20 points). Snapshot is rewritten every run with untouched baselines carried forward; in CI `actions/cache` persists this state between runs.
+4. Group detected trends across companies into cross-company signals, generate AI insights (batched, with fallback), and send **one consolidated digest email**.
+5. Techstack keeps its own prompt sections and parser (`PICKS AND SHOVELS`, `COMPETITIVE MOAT`, `LAGGARD WARNING`, `INVESTMENT THESIS`, `CONFIDENCE`) and follows the same parser-lockstep rule as the other agents.
+6. If `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` are unset, the agent logs a message and exits gracefully (no-op), matching the repo's fail-soft design.
+
 ### Key design points
 - **AI is optional.** When `OPENAI_API_KEY` is unset, `OpenAIClient.is_enabled` is `False` and the agent still runs with non-AI fallback text. Guard any new OpenAI use behind `is_enabled`.
 - **Rate limiting is client-side and stateful.** `FinnhubClient` (50/min) and `OpenAIClient` (3/min) self-throttle with `time.sleep`. `generate_individual_insights` also sleeps 10–15s between tickers. Long runtimes are expected by design.
@@ -74,10 +102,10 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 - **Failures are swallowed, not raised.** Client methods catch exceptions, print a message, and return empty/`None`; callers check for falsy results. Preserve this so one bad ticker doesn't abort the run.
 
 ### Automation
-`.github/workflows/earnings-agent.yml`, `.github/workflows/ratings-agent.yml`, and `.github/workflows/flights-agent.yml` run their agents daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings and flights workflows each add an `actions/cache` step to persist their snapshot (price targets / fares) between runs. Note: `get_settings()` requires `FINNHUB_API_KEY` for all agents, so the flights workflow still needs that secret even though the flights agent doesn't call Finnhub.
+`.github/workflows/earnings-agent.yml`, `.github/workflows/ratings-agent.yml`, `.github/workflows/flights-agent.yml`, and `.github/workflows/techstack-agent.yml` run daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings, flights, and techstack workflows each add an `actions/cache` step to persist snapshots (price targets / fares / tech mentions) between runs. Techstack additionally requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Note: `get_settings()` requires `FINNHUB_API_KEY` for all agents, so flights and techstack workflows still need that secret even though those agents do not call Finnhub.
 
 ## Adding a new agent
-Create `agents/<new_agent>/` with `agent.py`, `prompts.py`, `main.py`, and `README.md`; reuse `common/` modules; add a workflow under `.github/workflows/` if it needs scheduling. The `scaffold-new-agent` skill (see below) automates this scaffold.
+Create `agents/<new_agent>/` with `agent.py`, `prompts.py`, `main.py`, `__main__.py`, `README.md`, and `tests/test_agent.py`; reuse `common/` modules; add a workflow under `.github/workflows/` if it needs scheduling. The `scaffold-new-agent` skill (see below) automates this scaffold.
 
 ## Claude Code infrastructure
 Shared, team-checked-in config lives under `.claude/` (personal overrides go in the gitignored `.claude/settings.local.json`):
@@ -88,4 +116,5 @@ Shared, team-checked-in config lives under `.claude/` (personal overrides go in 
 - **`.claude/skills/sync-prompts-parser/`** — skill that diffs the section headers declared in an agent's `prompts.py` against the `parse_structured_insights` branches in `agent.py`, flags drift, and fixes the parser (plus result/fallback dict keys and the docstring) in lockstep. Complements the `prompts-parser-reminder` hook, which only reminds.
 - **`.claude/skills/add-agent-config/`** — skill that adds a config var end-to-end across the `Settings` dataclass + `get_settings()` in `common/config.py`, `env.example`, and the agent's `.github/workflows/*.yml` (with an `actions/cache` step for snapshot paths), handling required-vs-optional and casts.
 - **`.claude/skills/run-agent-locally/`** — skill that exercises an agent the safe way: runs its offline `tests/test_agent` smoke test by default, and only does a live `python -m agents.<name>.main` run (which sends real email) on explicit request, with the `TEST_MODE` and AI-optional caveats.
+- **`.claude/skills/format-agent-email/`** — skill that redesigns an agent email using `common/email/templates.py` helpers (inline CSS, table layout, escaped dynamic content via `et.esc`) for Gmail/Outlook-safe rendering.
 - **Worktrees** — `scripts/worktree.sh <branch>` creates a bootstrapped sibling worktree (own `venv` + copied `.env`) for parallel sessions; see `.claude/WORKTREES.md`.
