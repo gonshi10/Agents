@@ -4,7 +4,7 @@ Tracks technology adoption signals from job postings and emails one digest with
 investment implications.
 
 ## What It Does
-- Loads tracked companies from `companies.csv`.
+- Loads tracked companies from `companies.csv` (hand-curated rows + top-200 S&P 500 merge).
 - Fetches recent job postings via Adzuna per company query.
 - Extracts technology keyword mentions from posting title/description.
 - Compares mention-share changes against a snapshot to detect rising/falling trends.
@@ -47,4 +47,26 @@ Anthropic,,Anthropic machine learning engineer,AI
 
 `Ticker` can be blank for private companies. `SearchQuery` is used directly in
 the jobs API.
+
+## Regenerating S&P 500 Top-200 Merge
+
+The watchlist is intentionally merged, not replaced:
+- Existing hand-curated rows stay at the top.
+- Top-200 S&P 500 companies by market cap are appended.
+- Duplicates are skipped by ticker/name.
+
+Generate or refresh the merged file:
+
+```bash
+python3 scripts/generate_sp500_companies.py
+```
+
+Preview counts without writing:
+
+```bash
+python3 scripts/generate_sp500_companies.py --dry-run
+```
+
+Quota note: a full run over ~200+ companies can exceed Adzuna free-tier limits
+because each company currently fetches two result pages.
 

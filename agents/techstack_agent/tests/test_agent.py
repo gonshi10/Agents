@@ -54,11 +54,13 @@ def test_company_loading() -> bool:
 
         path = os.path.join(os.path.dirname(__file__), "..", "data", "companies.csv")
         companies = load_companies(path)
-        assert len(companies) >= 4, f"expected >=4 sample companies, got {len(companies)}"
-        first = companies[0]
-        assert first["company"] == "Apple"
-        assert first["ticker"] == "AAPL"
-        assert first["search_query"]
+        assert len(companies) >= 200, f"expected >=200 companies, got {len(companies)}"
+        tickers = [c["ticker"] for c in companies if c.get("ticker")]
+        names = {c["company"].strip().lower() for c in companies}
+        assert "AAPL" in tickers and "MSFT" in tickers and "NVDA" in tickers
+        assert "stripe" in names and "anthropic" in names
+        assert len(tickers) == len(set(tickers)), "duplicate tickers detected"
+        assert all(c.get("search_query", "").strip() for c in companies), "empty search_query detected"
         print("✓ Company loading behaves as expected")
         return True
     except Exception as exc:
