@@ -39,6 +39,7 @@ class Settings:
     techstack_watchlist_csv: str
     techstack_snapshot: str
     techstack_trend_threshold: float
+    techstack_lookback_days: int
     test_mode: bool
 
 
@@ -94,6 +95,7 @@ def get_settings() -> Settings:
             "TECHSTACK_SNAPSHOT", "./agents/techstack_agent/data/tech_mentions.snapshot.json"
         ),
         techstack_trend_threshold=float(os.getenv("TECHSTACK_TREND_THRESHOLD", "20")),
+        techstack_lookback_days=int(os.getenv("TECHSTACK_LOOKBACK_DAYS", "30")),
         test_mode=_as_bool(os.getenv("TEST_MODE"), default=False),
     )
 

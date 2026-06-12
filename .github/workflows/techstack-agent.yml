@@ -2,8 +2,8 @@ name: Techstack Agent
 
 on:
   schedule:
-    # Midnight ET is 04:00 UTC during EDT and 05:00 UTC during EST.
-    - cron: "0 5 * * *"   # hits midnight during EST
+    # 1st of each month at ~midnight ET (05:00 UTC during EST).
+    - cron: "0 5 1 * *"
   workflow_dispatch: {}
 
 jobs:
@@ -51,6 +51,7 @@ jobs:
           TECHSTACK_WATCHLIST_CSV:   ./agents/techstack_agent/data/companies.csv
           TECHSTACK_SNAPSHOT:        ./agents/techstack_agent/data/tech_mentions.snapshot.json
           TECHSTACK_TREND_THRESHOLD: "20"
+          TECHSTACK_LOOKBACK_DAYS:   "30"
         run: |
           python -m agents.techstack_agent.main
 

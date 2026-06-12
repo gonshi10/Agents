@@ -65,8 +65,8 @@ This is a **monorepo of autonomous agents**. The hard rule: agent-specific busin
 
 ### Ratings agent flow (`RatingsAgent.run`)
 1. For each watchlist ticker, fetch recommendation trends + price target from Finnhub.
-2. **Recommendation change is stateless** — diff the weighted consensus score of the latest vs prior monthly period (threshold in `agent.py`); no stored state.
-3. **Price-target change is stateful** — compare the current mean target against a JSON snapshot (`RATINGS_PT_SNAPSHOT`) of last-seen targets; the snapshot is rewritten every run (baselines for untouched tickers carried forward). In CI the snapshot survives ephemeral runners via `actions/cache`, so a ticker's price-target alerts begin on its second run.
+2. **Recommendation change is stateful** — diff the weighted consensus score of the latest vs prior monthly period (threshold in `agent.py`); the last notified alert is stored as `lastRecAlert` in the snapshot so the same shift is not emailed daily.
+3. **Price-target change is stateful** — compare the current mean target against a JSON snapshot (`RATINGS_PT_SNAPSHOT`) of last-seen targets; the snapshot is rewritten every run (baselines for untouched tickers carried forward, plus `lastRecAlert` when a recommendation alert fires). In CI the snapshot survives ephemeral runners via `actions/cache`, so a ticker's price-target alerts begin on its second run.
 4. Only changed tickers get AI insights (batched, with per-ticker fallback) and one email each. The ratings parser uses a `RATING RATIONALE` header where earnings uses `STRATEGIC ANALYSIS` — each agent owns its own `parse_structured_insights`.
 
 ### Flights agent flow (`FlightsAgent.run`)
@@ -87,11 +87,11 @@ flowchart TD
     aiInsights --> sendDigest[send one digest email]
 ```
 
-1. Load companies via `load_companies()` and fetch recent postings from Adzuna per `SearchQuery` (7 days normally, 30 days when `TEST_MODE=true`).
-2. Extract technology mentions from posting title/description using regex keyword sets, then compare current mention shares against the prior snapshot (`TECHSTACK_SNAPSHOT`).
+1. Load companies via `load_companies()` and fetch recent postings from Adzuna per `SearchQuery` (30-day lookback via `TECHSTACK_LOOKBACK_DAYS`).
+2. Extract technology mentions from posting title/description using regex keyword sets (**programming languages excluded**), then compare current mention shares against the prior snapshot (`TECHSTACK_SNAPSHOT`, versioned with `snapshot_version: 2`).
 3. **Trend detection is stateful** — per company, classify each technology as `NEW`, `RISING`, or `FALLING` based on mention-share deltas and thresholds (`TECHSTACK_TREND_THRESHOLD`, default 20 points). Snapshot is rewritten every run with untouched baselines carried forward; in CI `actions/cache` persists this state between runs.
-4. Group detected trends across companies into cross-company signals, generate AI insights (batched, with fallback), and send **one consolidated digest email**.
-5. Techstack keeps its own prompt sections and parser (`PICKS AND SHOVELS`, `COMPETITIVE MOAT`, `LAGGARD WARNING`, `INVESTMENT THESIS`, `CONFIDENCE`) and follows the same parser-lockstep rule as the other agents.
+4. Group detected trends across companies into cross-company signals, generate AI insights (batched, with fallback), and send **one consolidated digest email** focused on vendor companies and adopting employers.
+5. Techstack keeps its own prompt sections and parser (`VENDOR & PRODUCT`, `ADOPTION SIGNAL`, `INVESTMENT THESIS`, `CONFIDENCE`) and follows the same parser-lockstep rule as the other agents.
 6. If `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` are unset, the agent logs a message and exits gracefully (no-op), matching the repo's fail-soft design.
 
 ### Key design points
@@ -102,7 +102,7 @@ flowchart TD
 - **Failures are swallowed, not raised.** Client methods catch exceptions, print a message, and return empty/`None`; callers check for falsy results. Preserve this so one bad ticker doesn't abort the run.
 
 ### Automation
-`.github/workflows/earnings-agent.yml`, `.github/workflows/ratings-agent.yml`, `.github/workflows/flights-agent.yml`, and `.github/workflows/techstack-agent.yml` run daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. All config comes from GitHub Actions secrets matching the env var names. The ratings, flights, and techstack workflows each add an `actions/cache` step to persist snapshots (price targets / fares / tech mentions) between runs. Techstack additionally requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Note: `get_settings()` requires `FINNHUB_API_KEY` for all agents, so flights and techstack workflows still need that secret even though those agents do not call Finnhub.
+`.github/workflows/earnings-agent.yml`, `.github/workflows/ratings-agent.yml`, and `.github/workflows/flights-agent.yml` run daily (cron `0 5 * * *`, ~midnight ET) on Python 3.12. `.github/workflows/techstack-agent.yml` runs **monthly** on the 1st (`0 5 1 * *`). All config comes from GitHub Actions secrets matching the env var names. The ratings, flights, and techstack workflows each add an `actions/cache` step to persist snapshots (price targets / fares / tech mentions) between runs. Techstack additionally requires `ADZUNA_APP_ID` and `ADZUNA_APP_KEY`. Note: `get_settings()` requires `FINNHUB_API_KEY` for all agents, so flights and techstack workflows still need that secret even though those agents do not call Finnhub.
 
 ## Adding a new agent
 Create `agents/<new_agent>/` with `agent.py`, `prompts.py`, `main.py`, `__main__.py`, `README.md`, and `tests/test_agent.py`; reuse `common/` modules; add a workflow under `.github/workflows/` if it needs scheduling. The `scaffold-new-agent` skill (see below) automates this scaffold.

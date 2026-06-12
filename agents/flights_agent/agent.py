@@ -2,8 +2,8 @@
 
 Watches a CSV watchlist of flight routes and emails ONE digest when a fare is
 worth knowing about. Two triggers:
-- Target price (stateless per run): the current cheapest fare is at or below a
-  per-route ``MaxPrice`` from the watchlist.
+- Target price (stateful): the fare newly crosses at or below a per-route
+  ``MaxPrice`` — first run, or the prior snapshot was above the target.
 - Price drop (stateful): the Aviasales Data API exposes only a current cheapest
   fare with no history, so the last-seen price is persisted to
   ``flights_price_snapshot`` between runs (restored from GitHub Actions cache in
@@ -83,10 +83,10 @@ class FlightsAgent:
         fare: dict[str, Any],
         prev: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        """Flag a route when the fare hits its target price or drops materially.
+        """Flag a route when the fare newly hits its target price or drops materially.
 
-        First-seen routes (no ``prev``) only set a baseline for target hits — a
-        drop needs a prior price to compare against.
+        Target alerts fire on transition into the below-target zone (first run or
+        prior price above ``MaxPrice``). A drop needs a prior price to compare.
         """
         price = float(fare["price"])
         max_price = route.get("max_price")
@@ -99,7 +99,10 @@ class FlightsAgent:
 
         reasons: list[str] = []
         target_hit = max_price is not None and price <= max_price
-        if target_hit:
+        newly_at_target = target_hit and (
+            prev_price is None or prev_price > max_price
+        )
+        if newly_at_target:
             reasons.append(f"At/below target ${max_price:.0f}")
 
         pct = None
