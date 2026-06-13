@@ -85,6 +85,19 @@ def test_detection_logic() -> bool:
         change = agent.detect_change(route, {"price": 600.0}, None)
         assert change is not None and any("target" in r.lower() for r in change["reasons"])
 
+        # Second run, still below target with unchanged price -> no repeat alert.
+        assert agent.detect_change(route, {"price": 600.0}, {"price": 600.0}) is None
+
+        # Second run, newly below target (prev was above) -> target alert.
+        reentry = agent.detect_change(route, {"price": 600.0}, {"price": 700.0})
+        assert reentry is not None and any("target" in r.lower() for r in reentry["reasons"])
+
+        # Below target with >=10% drop vs snapshot -> drop alert only (no target repeat).
+        drop_below = agent.detect_change(route, {"price": 500.0}, {"price": 600.0})
+        assert drop_below is not None
+        assert any("drop" in r.lower() for r in drop_below["reasons"])
+        assert not any("target" in r.lower() for r in drop_below["reasons"])
+
         # First-seen, above target -> no alert (nothing to compare for a drop).
         assert agent.detect_change(route, {"price": 900.0}, None) is None
 

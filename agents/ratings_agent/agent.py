@@ -1,9 +1,10 @@
 """Core analyst ratings agent implementation.
 
 Alerts when Wall Street sentiment on a watchlist ticker shifts:
-- Recommendation consensus (stateless): the latest monthly analyst-count period
+- Recommendation consensus (stateful): the latest monthly analyst-count period
   is compared against the prior period from a single ``/stock/recommendation``
-  call. No persisted state is required.
+  call. The last notified alert is persisted as ``lastRecAlert`` in the snapshot
+  so the same month-over-month shift is not emailed again on every run.
 - Price target (stateful): ``/stock/price-target`` is a current snapshot with no
   history, so the last-seen mean target is persisted to ``ratings_pt_snapshot``
   between runs (restored from GitHub Actions cache in CI) and compared.
@@ -172,6 +173,30 @@ class RatingsAgent:
                 "strongSell": latest.get("strongSell", 0),
             },
         }
+
+    @staticmethod
+    def _rec_alert_fingerprint(rec_change: dict[str, Any]) -> dict[str, str]:
+        """Stable key for the recommendation alert we already notified on."""
+        return {
+            "period_after": str(rec_change.get("period_after", "N/A")),
+            "period_before": str(rec_change.get("period_before", "N/A")),
+            "direction": str(rec_change.get("direction", "")),
+        }
+
+    @staticmethod
+    def _is_repeat_rec_alert(
+        rec_change: dict[str, Any], prev_entry: dict[str, Any] | None
+    ) -> bool:
+        """True when this recommendation alert matches the last one we sent."""
+        last = (prev_entry or {}).get("lastRecAlert")
+        if not isinstance(last, dict):
+            return False
+        fingerprint = RatingsAgent._rec_alert_fingerprint(rec_change)
+        return (
+            last.get("period_after") == fingerprint["period_after"]
+            and last.get("period_before") == fingerprint["period_before"]
+            and last.get("direction") == fingerprint["direction"]
+        )
 
     def _detect_pt_change(
         self, ticker: str, price_target: dict[str, Any], previous_pt: dict[str, dict[str, Any]]
@@ -555,13 +580,19 @@ Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             try:
                 trends = self.finnhub.get_recommendation_trends(ticker)
                 rec_change = self._detect_rec_change(trends)
+                if rec_change and self._is_repeat_rec_alert(rec_change, previous_pt.get(ticker)):
+                    rec_change = None
 
                 price_target = self.finnhub.get_price_target(ticker)
                 if price_target.get("targetMean") not in (None, 0, "0"):
-                    current_pt[ticker] = {
-                        "targetMean": price_target.get("targetMean"),
-                        "lastUpdated": price_target.get("lastUpdated"),
-                    }
+                    entry = dict(previous_pt.get(ticker) or {})
+                    entry.update(
+                        {
+                            "targetMean": price_target.get("targetMean"),
+                            "lastUpdated": price_target.get("lastUpdated"),
+                        }
+                    )
+                    current_pt[ticker] = entry
                 pt_change = self._detect_pt_change(ticker, price_target, previous_pt)
 
                 if rec_change or pt_change:
@@ -574,6 +605,12 @@ Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         # Carry forward baselines for tickers we didn't refresh this run.
         for ticker, entry in previous_pt.items():
             current_pt.setdefault(ticker, entry)
+
+        for ticker, change in changes.items():
+            if change.get("rec"):
+                entry = current_pt.setdefault(ticker, dict(previous_pt.get(ticker) or {}))
+                entry["lastRecAlert"] = self._rec_alert_fingerprint(change["rec"])
+
         self._save_snapshot(current_pt)
 
         if not changes:

@@ -11,6 +11,7 @@ from typing import Any
 from common.clients.finnhub import FinnhubClient
 from common.clients.openai_client import OpenAIClient
 from common.config import Settings
+from common.email import templates as et
 from common.email.sender import EmailSender
 from common.watchlist import load_tickers
 
@@ -342,6 +343,30 @@ class EarningsAgent:
         except (ValueError, TypeError):
             return str(value)
 
+    @staticmethod
+    def _beat_miss(actual_raw: Any, estimate_raw: Any) -> tuple[str, str]:
+        if actual_raw in (None, "N/A") or estimate_raw in (None, "N/A"):
+            return "—", "neutral"
+        try:
+            actual = float(actual_raw)
+            estimate = float(estimate_raw)
+        except (ValueError, TypeError):
+            return "—", "neutral"
+        if actual > estimate:
+            return "Beat", "up"
+        if actual < estimate:
+            return "Miss", "down"
+        return "Meet", "neutral"
+
+    @staticmethod
+    def _recommendation_badge_kind(recommendation: str) -> str:
+        prefix = recommendation.strip().upper().split()[0] if recommendation.strip() else ""
+        if prefix.startswith("BUY"):
+            return "up"
+        if prefix.startswith("SELL"):
+            return "down"
+        return "neutral"
+
     def create_email_content(
         self,
         ticker: str,
@@ -360,44 +385,61 @@ class EarningsAgent:
         recommendation = ai_insights.get("investment_recommendation", "HOLD (Medium Confidence)")
         expert = ai_insights.get("expert_recommendation", "General Financial Analyst")
 
-        insights_html_sections: list[str] = []
-        if summary and self._is_meaningful_summary(summary):
-            insights_html_sections.append(f"<h4>Executive Summary</h4><p>{summary}</p>")
-        if strategic:
-            insights_html_sections.append(f"<h4>Strategic Analysis</h4><p>{strategic}</p>")
-        if risks:
-            insights_html_sections.append(f"<h4>Risk Factors</h4><p>{risks}</p>")
-        if not insights_html_sections:
-            insights_html_sections.append("<p>No insights available.</p>")
-
-        news_html = "".join(
-            [
-                f"<li><a href=\"{item.get('url', '#')}\">{item.get('headline', 'N/A')}</a></li>"
-                for item in news_data[:3]
-            ]
+        eps_badge_text, eps_badge_kind = self._beat_miss(
+            earnings_data.get("epsActual"), earnings_data.get("epsEstimate")
+        )
+        rev_badge_text, rev_badge_kind = self._beat_miss(
+            earnings_data.get("revenueActual"), earnings_data.get("revenueEstimate")
         )
 
-        html_content = f"""
-<!DOCTYPE html>
-<html>
-<body style="font-family: Arial, sans-serif; color: #222;">
-  <h2>{ticker} Earnings Report</h2>
-  <h3>Financial Results</h3>
-  <p><strong>EPS:</strong> {eps_est} -> {eps_act}</p>
-  <p><strong>Revenue:</strong> {rev_est} -> {rev_act}</p>
-  <h3>Investment Recommendation</h3>
-  <p>{recommendation}</p>
-  <h3>Expert Recommendation</h3>
-  <p>{expert}</p>
-  <h3>AI Insights</h3>
-  {''.join(insights_html_sections)}
-  <h3>Recent News</h3>
-  <ul>{news_html}</ul>
-  <hr />
-  <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-</body>
-</html>
-"""
+        fin_card = et.card(
+            et.metric_row(
+                et.metric_tile("EPS", eps_act, eps_est, eps_badge_text, eps_badge_kind),
+                et.metric_tile("Revenue", rev_act, rev_est, rev_badge_text, rev_badge_kind),
+            ),
+            title="Financial Results",
+        )
+
+        rec_prefix = recommendation.split()[0] if recommendation.strip() else "HOLD"
+        rec_card = et.card(
+            et.badge(rec_prefix, self._recommendation_badge_kind(recommendation))
+            + et.key_value("Investment Recommendation", recommendation)
+            + et.key_value("Expert", expert),
+            title="Recommendations",
+        )
+
+        insight_sections: list[str] = []
+        if summary and self._is_meaningful_summary(summary):
+            insight_sections.append(et.section("Executive Summary", summary))
+        if strategic:
+            insight_sections.append(et.section("Strategic Analysis", strategic))
+        if risks:
+            insight_sections.append(et.section("Risk Factors", risks))
+        if not insight_sections:
+            insight_sections.append(et.section("AI Insights", "No insights available."))
+        insights_card = et.card("".join(insight_sections), title="AI Insights")
+
+        news_items = [
+            et.news_item(item.get("headline", "N/A"), item.get("url", "#"))
+            for item in news_data[:3]
+        ]
+        news_card = et.card(
+            "".join(news_items) if news_items else et.esc("No recent news available."),
+            title="Recent News",
+        )
+
+        generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        html_content = et.page(
+            f"{ticker} Earnings Report",
+            [
+                et.header(ticker, "Earnings Report"),
+                fin_card,
+                rec_card,
+                insights_card,
+                news_card,
+                et.footer(f"Generated on {generated}"),
+            ],
+        )
 
         plain_news = "\n".join([f"- {item.get('headline', 'N/A')}" for item in news_data[:3]])
         plain_content = f"""

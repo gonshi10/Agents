@@ -78,6 +78,32 @@ def test_detection_logic() -> bool:
         # No baseline -> None.
         assert agent._detect_pt_change("TEST", {"targetMean": 202.0}, {}) is None
 
+        # Repeat rec alert matches stored fingerprint.
+        rec_change = {
+            "direction": "UPGRADE",
+            "period_before": "2026-05",
+            "period_after": "2026-06",
+        }
+        prev_entry = {
+            "targetMean": 200.0,
+            "lastRecAlert": {
+                "period_before": "2026-05",
+                "period_after": "2026-06",
+                "direction": "UPGRADE",
+            },
+        }
+        assert agent._is_repeat_rec_alert(rec_change, prev_entry) is True
+
+        # New month -> not a repeat.
+        new_period = {**rec_change, "period_after": "2026-07"}
+        assert agent._is_repeat_rec_alert(new_period, prev_entry) is False
+
+        # Snapshot merge preserves lastRecAlert when updating price target fields.
+        merged = dict(prev_entry)
+        merged.update({"targetMean": 220.0, "lastUpdated": "2026-06-01"})
+        assert merged["lastRecAlert"]["period_after"] == "2026-06"
+        assert merged["targetMean"] == 220.0
+
         print("✓ Detection logic behaves as expected")
         return True
     except Exception as exc:

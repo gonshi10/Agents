@@ -61,7 +61,7 @@ Agents/
   Watches a watchlist of flight routes and emails a digest on price drops or target-price hits.
   Detailed docs: [`agents/flights_agent/README.md`](agents/flights_agent/README.md)
 - `agents/techstack_agent`  
-  Monitors job-posting language for technology adoption shifts and sends one digest email on meaningful trends.
+  Monitors monthly job-posting technology adoption (products + vendors, not languages) and sends one digest on meaningful trends.
   Detailed docs: [`agents/techstack_agent/README.md`](agents/techstack_agent/README.md)
 
 ## Scripts

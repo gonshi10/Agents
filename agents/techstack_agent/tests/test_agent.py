@@ -84,6 +84,7 @@ def test_detection_logic() -> bool:
         ]
         counts, total = agent.extract_tech_mentions(postings)
         assert total == 3
+        assert counts.get("Python", 0) == 0, "programming languages should not be tracked"
         assert counts.get("Kubernetes", 0) >= 2
 
         previous = {"technologies": {"Kubernetes": 0, "Kafka": 1}, "total": 10}

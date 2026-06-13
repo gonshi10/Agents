@@ -119,6 +119,49 @@ def link_button(text: str, url: str) -> str:
     )
 
 
+def metric_tile(
+    label: str,
+    actual: str,
+    estimate: str,
+    badge_text: str,
+    badge_kind: str = "neutral",
+) -> str:
+    """Single metric cell: large actual value, label, estimate line, and beat/miss badge."""
+    badge_html = badge(badge_text, badge_kind) if badge_text != "—" else ""
+    return (
+        f'<div style="background-color:#f8f9fa;border-radius:8px;padding:14px 12px;'
+        f'text-align:center;">'
+        f'<div style="font-size:22px;font-weight:700;color:{ACCENT};margin:0 0 4px 0;">'
+        f"{esc(actual)}</div>"
+        f'<div style="font-size:13px;color:{MUTED};margin:0 0 2px 0;">{esc(label)}</div>'
+        f'<div style="font-size:12px;color:{MUTED};margin:0 0 8px 0;">'
+        f"Est: {esc(estimate)}</div>"
+        f"{badge_html}"
+        f"</div>"
+    )
+
+
+def metric_row(*tiles: str) -> str:
+    """Place metric tiles side-by-side in a table row (email-safe two-column layout)."""
+    cells = "".join(
+        f'<td style="width:50%;padding:0 4px;vertical-align:top;">{tile}</td>'
+        for tile in tiles
+    )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%;margin:0 0 4px 0;"><tr>{cells}</tr></table>'
+    )
+
+
+def news_item(headline: str, url: str) -> str:
+    """Bordered news row with a linked headline."""
+    return (
+        f'<div style="padding:10px 0;border-bottom:1px solid {BORDER};">'
+        f'<a href="{esc(url)}" style="color:#0d6efd;text-decoration:none;'
+        f'font-size:15px;line-height:1.5;">{esc(headline)}</a></div>'
+    )
+
+
 def footer(text: str) -> str:
     """Muted, centered fine print."""
     return (
