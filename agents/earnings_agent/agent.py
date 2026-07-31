@@ -601,7 +601,7 @@ class EarningsAgent:
             badge_kind=self._recommendation_badge_kind(parsed_rec["rating"]),
         )
 
-        metrics_body = et.metrics_row(
+        metrics_body = et.metric_row(
             et.metric_tile(
                 "EPS", eps_act, eps_est, eps_badge_text, eps_badge_kind, eps_surprise_line
             ),

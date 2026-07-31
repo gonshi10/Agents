@@ -6,7 +6,7 @@ Watches a watchlist of flight routes and emails **one digest** when a fare is wo
 - Loads routes from a CSV (`Origin, Destination, DepartMonth`, plus optional `ReturnMonth, MaxPrice, OneWay`).
 - Fetches the current cheapest fare per route from the free Travelpayouts / Aviasales Data API.
 - Alerts when **either** trigger fires:
-  - **Target price** — the fare is at or below the route's `MaxPrice`.
+  - **Target price** — the fare newly crosses at or below the route's `MaxPrice` (first run, or the prior snapshot was above target).
   - **Price drop** — the fare fell by ≥ `FLIGHTS_PRICE_DROP_PCT` vs the last-seen price (persisted in a JSON snapshot between runs).
 - Sends a single consolidated digest email (optional AI deal commentary per route).
 
@@ -44,7 +44,7 @@ TLV,LON,2026-08,,200,true
 `DepartMonth`/`ReturnMonth` use `YYYY-MM` (whole-month cheapest) or `YYYY-MM-DD`. Leave `ReturnMonth` blank for one-way.
 
 ## Runtime Notes
-- **Price-drop alerts begin on a route's second run** (the first run only seeds the snapshot). Target-price alerts work on the first run.
+- **Price-drop alerts begin on a route's second run** (the first run only seeds the snapshot). Target-price alerts fire on the first below-target sighting or when the fare re-enters the target zone after rising above it — not on every run while the price stays cheap.
 - Failures are swallowed per route — one bad route never aborts the run.
 - The Travelpayouts data reflects the cheapest fares users found in the last ~48h.
 

@@ -1,7 +1,7 @@
 """Core techstack agent implementation.
 
-Monitors hiring-language shifts in tracked companies' job postings and infers
-investment signals from changing technology adoption patterns.
+Monitors monthly technology adoption shifts in tracked companies' job postings
+and emails a digest focused on products, vendors, and adopting employers.
 """
 
 from __future__ import annotations
@@ -22,38 +22,6 @@ from common.watchlist import load_companies
 from .prompts import BATCH_TEMPLATE_HEADER, SYSTEM_PROMPT
 
 TECH_KEYWORDS: dict[str, list[str]] = {
-    # Programming Languages
-    "Python": [r"\bpython\b"],
-    "Rust": [r"\brust\b"],
-    "Go": [r"\bgolang\b", r"\bgo\b(?! lang)"],
-    "TypeScript": [r"\btypescript\b"],
-    "JavaScript": [r"\bjavascript\b", r"\bjs\b"],
-    "Java": [r"\bjava\b(?!script)"],
-    "Kotlin": [r"\bkotlin\b"],
-    "Swift": [r"\bswift\b(?! ui)?"],
-    "C++": [r"c\+\+", r"\bcpp\b"],
-    "C#": [r"c#", r"\bcsharp\b"],
-    "Scala": [r"\bscala\b"],
-    "Ruby": [r"\bruby\b"],
-    "PHP": [r"\bphp\b"],
-    "Dart": [r"\bdart\b"],
-    "Elixir": [r"\belixir\b"],
-    "Clojure": [r"\bclojure\b"],
-    "Haskell": [r"\bhaskell\b"],
-    "Erlang": [r"\berlang\b"],
-    "Zig": [r"\bzig\b"],
-    "Julia": [r"\bjulia\b(?! roberts)"],
-    "R": [r"\br language\b", r"\brlang\b", r"\br programming\b"],
-    "MATLAB": [r"\bmatlab\b"],
-    "Fortran": [r"\bfortran\b"],
-    "COBOL": [r"\bcobol\b"],
-    "Lua": [r"\blua\b"],
-    "Groovy": [r"\bgroovy\b"],
-    "OCaml": [r"\bocaml\b"],
-    "F#": [r"\bf#\b", r"\bfsharp\b"],
-    "Verilog": [r"\bverilog\b"],
-    "VHDL": [r"\bvhdl\b"],
-    "Assembly": [r"\bassembly\b", r"\basm\b"],
     # Web & Backend Frameworks
     "React": [r"\breact\b(?!\.js| native)"],
     "Next.js": [r"\bnext\.js\b", r"\bnextjs\b"],
@@ -389,39 +357,6 @@ TECH_KEYWORDS: dict[str, list[str]] = {
 }
 
 TECH_CATEGORY_SETS: dict[str, set[str]] = {
-    "Languages": {
-        "Python",
-        "Rust",
-        "Go",
-        "TypeScript",
-        "JavaScript",
-        "Java",
-        "Kotlin",
-        "Swift",
-        "C++",
-        "C#",
-        "Scala",
-        "Ruby",
-        "PHP",
-        "Dart",
-        "Elixir",
-        "Clojure",
-        "Haskell",
-        "Erlang",
-        "Zig",
-        "Julia",
-        "R",
-        "MATLAB",
-        "Fortran",
-        "COBOL",
-        "Lua",
-        "Groovy",
-        "OCaml",
-        "F#",
-        "Verilog",
-        "VHDL",
-        "Assembly",
-    },
     "WebAndBackend": {
         "React",
         "Next.js",
@@ -719,6 +654,8 @@ TECH_CATEGORY_MAP: dict[str, str] = {
     tech: category for category, technologies in TECH_CATEGORY_SETS.items() for tech in technologies
 }
 
+SNAPSHOT_VERSION = 2
+
 
 class TechstackAgent:
     def __init__(self, settings: Settings):
@@ -736,6 +673,7 @@ class TechstackAgent:
             default_to=settings.email_to,
         )
         self.trend_threshold = settings.techstack_trend_threshold
+        self.lookback_days = settings.techstack_lookback_days
         self.snapshot_path = Path(settings.techstack_snapshot)
 
         self.client = (
@@ -892,16 +830,30 @@ class TechstackAgent:
             if self.snapshot_path.exists():
                 with open(self.snapshot_path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
-                    return data if isinstance(data, dict) else {}
+                    if not isinstance(data, dict):
+                        return {}
+                    version = data.get("snapshot_version")
+                    if version != SNAPSHOT_VERSION:
+                        print(
+                            f"ℹ️ Snapshot version mismatch ({version!r} != {SNAPSHOT_VERSION}) "
+                            "— treating as baseline month"
+                        )
+                        return {}
+                    companies = data.get("companies", {})
+                    return companies if isinstance(companies, dict) else {}
         except Exception as exc:
             print(f"⚠️ Failed to load tech snapshot: {exc}")
         return {}
 
-    def _save_snapshot(self, data: dict[str, dict[str, Any]]) -> None:
+    def _save_snapshot(self, companies: dict[str, dict[str, Any]]) -> None:
         try:
             self.snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "snapshot_version": SNAPSHOT_VERSION,
+                "companies": companies,
+            }
             with open(self.snapshot_path, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
+                json.dump(payload, handle, indent=2)
             print(f"✓ Tech snapshot saved to {self.snapshot_path}")
         except Exception as exc:
             print(f"✗ Failed to save tech snapshot: {exc}")
@@ -909,18 +861,16 @@ class TechstackAgent:
     @staticmethod
     def _blank_insight() -> dict[str, str]:
         return {
-            "picks_and_shovels": "",
-            "competitive_moat": "",
-            "laggard_warning": "",
+            "vendor_and_product": "",
+            "adoption_signal": "",
             "investment_thesis": "",
             "confidence": "MEDIUM - No explicit confidence provided.",
         }
 
     def _disabled_insight(self) -> dict[str, str]:
         return {
-            "picks_and_shovels": "AI insights disabled - set OPENAI_API_KEY to enable.",
-            "competitive_moat": "",
-            "laggard_warning": "",
+            "vendor_and_product": "AI insights disabled - set OPENAI_API_KEY to enable.",
+            "adoption_signal": "",
             "investment_thesis": "",
             "confidence": "N/A",
         }
@@ -964,17 +914,13 @@ class TechstackAgent:
                             break
                 continue
 
-            if "PICKS AND SHOVELS" in upper:
+            if "VENDOR & PRODUCT" in upper or "VENDOR AND PRODUCT" in upper:
                 flush()
-                current_section = "picks_and_shovels"
+                current_section = "vendor_and_product"
                 section_buffer = []
-            elif "COMPETITIVE MOAT" in upper:
+            elif "ADOPTION SIGNAL" in upper:
                 flush()
-                current_section = "competitive_moat"
-                section_buffer = []
-            elif "LAGGARD WARNING" in upper:
-                flush()
-                current_section = "laggard_warning"
+                current_section = "adoption_signal"
                 section_buffer = []
             elif "INVESTMENT THESIS" in upper:
                 flush()
@@ -1012,8 +958,8 @@ class TechstackAgent:
                         f"FALLING AT: {falling}",
                         f"AVG SHARE DELTA: {signal.get('avg_delta', 0.0)}",
                         f"MARKET-WIDE SIGNAL: {'YES' if signal.get('market_wide') else 'NO'}",
-                        "QUESTION: Which public companies are primary financial beneficiaries,",
-                        "what is the revenue mechanism, and what should an investor do now?",
+                        "QUESTION: Who is the vendor behind this technology, which tracked",
+                        "employers are adopting or dropping it, and what should an investor do now?",
                         "",
                     ]
                 )
@@ -1034,9 +980,8 @@ class TechstackAgent:
             f"NEW AT: {new}\n"
             f"FALLING AT: {falling}\n\n"
             "Format:\n"
-            "PICKS AND SHOVELS: ...\n"
-            "COMPETITIVE MOAT: ...\n"
-            "LAGGARD WARNING: ...\n"
+            "VENDOR & PRODUCT: ...\n"
+            "ADOPTION SIGNAL: ...\n"
             "INVESTMENT THESIS: ...\n"
             "CONFIDENCE: ...\n"
         )
@@ -1049,9 +994,8 @@ class TechstackAgent:
             return self.parse_structured_insights(content, [tech]).get(tech, self._blank_insight())
         except Exception as exc:
             return {
-                "picks_and_shovels": f"AI insights unavailable: {exc}",
-                "competitive_moat": "",
-                "laggard_warning": "",
+                "vendor_and_product": f"AI insights unavailable: {exc}",
+                "adoption_signal": "",
                 "investment_thesis": "",
                 "confidence": "N/A",
             }
@@ -1087,11 +1031,10 @@ class TechstackAgent:
         insights: dict[str, dict[str, str]],
     ) -> tuple[str, str, str]:
         n = len(signals)
-        subject = f"🔧 {n} tech adoption trend{'s' if n != 1 else ''} detected"
+        subject = f"Monthly tech trends — {n} signal{'s' if n != 1 else ''}"
 
         html_cards: list[str] = []
         plain_blocks: list[str] = []
-        category_momentum = self.summarize_category_momentum(signals)
 
         ordered = sorted(
             signals.items(),
@@ -1107,20 +1050,17 @@ class TechstackAgent:
                 badges.append(et.badge(f"New: {company}", "up"))
             for company in signal.get("falling", []):
                 badges.append(et.badge(f"Falling: {company}", "down"))
-            if not badges:
-                badges.append(et.badge("Signal detected", "neutral"))
 
-            card_body = "".join(badges)
-            card_body += et.key_value("Category", signal.get("category", "GeneralTech"))
+            card_body = et.section(
+                "Vendor & Product",
+                insight.get("vendor_and_product", "No vendor analysis available."),
+            )
+            if badges:
+                card_body += et.section("Adoption at Tracked Companies", "".join(badges))
             card_body += et.key_value("Market-Wide", "Yes" if signal.get("market_wide") else "No")
             card_body += et.key_value("Average Share Delta", f"{signal.get('avg_delta', 0.0)} pts")
-            card_body += et.section(
-                "Picks and Shovels", insight.get("picks_and_shovels", "No analysis available.")
-            )
-            if insight.get("competitive_moat"):
-                card_body += et.section("Competitive Moat", insight["competitive_moat"])
-            if insight.get("laggard_warning"):
-                card_body += et.section("Laggard Warning", insight["laggard_warning"])
+            if insight.get("adoption_signal"):
+                card_body += et.section("Adoption Signal", insight["adoption_signal"])
             if insight.get("investment_thesis"):
                 card_body += et.section("Investment Thesis", insight["investment_thesis"])
             card_body += et.key_value("Confidence", insight.get("confidence", "N/A"))
@@ -1130,12 +1070,11 @@ class TechstackAgent:
                 "\n".join(
                     [
                         f"{tech}",
+                        f"  Vendor & product: {insight.get('vendor_and_product', '')}",
                         f"  Rising: {', '.join(signal.get('rising', [])) or 'None'}",
                         f"  New: {', '.join(signal.get('new', [])) or 'None'}",
                         f"  Falling: {', '.join(signal.get('falling', [])) or 'None'}",
-                        f"  Picks & shovels: {insight.get('picks_and_shovels', '')}",
-                        f"  Moat: {insight.get('competitive_moat', '')}",
-                        f"  Laggard: {insight.get('laggard_warning', '')}",
+                        f"  Adoption signal: {insight.get('adoption_signal', '')}",
                         f"  Thesis: {insight.get('investment_thesis', '')}",
                         f"  Confidence: {insight.get('confidence', 'N/A')}",
                     ]
@@ -1143,44 +1082,35 @@ class TechstackAgent:
             )
 
         generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        momentum_rows: list[str] = []
-        momentum_plain: list[str] = []
-        ordered_categories = sorted(
-            category_momentum.items(),
-            key=lambda item: (
-                item[1]["rising"] + item[1]["new"] - item[1]["falling"],
-                item[1]["avg_delta"],
-            ),
-            reverse=True,
-        )
-        for category, metrics in ordered_categories:
-            momentum_rows.append(
-                et.key_value(
-                    category,
-                    f"Rising {metrics['rising']} | New {metrics['new']} | "
-                    f"Falling {metrics['falling']} | Avg delta {metrics['avg_delta']} pts",
-                )
+        top_mover_rows: list[str] = []
+        top_mover_plain: list[str] = []
+        for tech, signal in ordered[:8]:
+            employers = (
+                signal.get("rising", []) + signal.get("new", []) + signal.get("falling", [])
             )
-            momentum_plain.append(
-                f"{category}: Rising {metrics['rising']}, New {metrics['new']}, "
-                f"Falling {metrics['falling']}, Avg delta {metrics['avg_delta']} pts"
+            summary = ", ".join(employers[:4]) + ("…" if len(employers) > 4 else "")
+            top_mover_rows.append(
+                et.key_value(tech, f"Avg delta {signal.get('avg_delta', 0.0)} pts — {summary or 'N/A'}")
+            )
+            top_mover_plain.append(
+                f"{tech}: avg delta {signal.get('avg_delta', 0.0)} pts — {summary or 'N/A'}"
             )
 
         html_content = et.page(
-            "Tech Adoption Investment Signals",
+            "Monthly Tech Trends",
             [
-                et.header("Tech Adoption Investment Signals", f"{n} technology trend(s) detected"),
-                et.card("".join(momentum_rows), title="Hot Category Momentum"),
+                et.header("Monthly Tech Trends", f"{n} technology trend(s) this month"),
+                et.card("".join(top_mover_rows), title="Top Movers This Month"),
                 *html_cards,
                 et.footer(f"Generated on {generated}"),
             ],
         )
         plain_content = (
-            "TECH ADOPTION INVESTMENT SIGNALS\n"
-            "===============================\n\n"
-            + "HOT CATEGORY MOMENTUM\n"
+            "MONTHLY TECH TRENDS\n"
+            "===================\n\n"
+            + "TOP MOVERS THIS MONTH\n"
             + "---------------------\n"
-            + ("\n".join(momentum_plain) if momentum_plain else "No category momentum signals.")
+            + ("\n".join(top_mover_plain) if top_mover_plain else "No trends detected.")
             + "\n\n"
             + "\n\n".join(plain_blocks)
             + f"\n\nGenerated on {generated}\n"
@@ -1204,7 +1134,8 @@ class TechstackAgent:
         previous = self._load_snapshot()
         current: dict[str, dict[str, Any]] = {}
         company_trends: list[dict[str, Any]] = []
-        max_days_old = 30 if test_mode else 7
+        max_days_old = self.lookback_days
+        print(f"📅 Using {max_days_old}-day job posting lookback")
 
         for idx, company in enumerate(companies, 1):
             name = company["company"]

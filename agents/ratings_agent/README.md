@@ -17,11 +17,13 @@ python -m agents.ratings_agent.tests.test_agent
 
 ## How detection works
 
-- **Recommendation consensus — stateless.** Finnhub `/stock/recommendation`
+- **Recommendation consensus — stateful.** Finnhub `/stock/recommendation`
   returns *monthly aggregated* analyst counts. The agent computes a weighted
   consensus score `(2*strongBuy + buy - sell - 2*strongSell) / total` for the
   latest and prior months and flags an UPGRADE/DOWNGRADE when the change exceeds
-  `REC_SCORE_THRESHOLD` (default 0.15). No stored state needed.
+  `REC_SCORE_THRESHOLD` (default 0.15). The last notified alert is stored as
+  `lastRecAlert` in the snapshot so the same month-over-month shift is not
+  emailed again on every run.
 - **Price target — stateful.** Finnhub `/stock/price-target` is a current
   snapshot with no history, so the last-seen mean target is persisted to
   `RATINGS_PT_SNAPSHOT` (default `agents/ratings_agent/data/price_targets.snapshot.json`)
@@ -46,7 +48,6 @@ The watchlist CSV uses a single `Symbol` column (read by `common/watchlist.py`).
 ## Automation
 
 `.github/workflows/ratings-agent.yml` runs daily (cron `0 5 * * *`, Python 3.12).
-Because GitHub Actions runners are ephemeral, the price-target snapshot is
-persisted between runs via **`actions/cache`** (the recommendation-trend signal
-needs no state — it's derived month-over-month from a single live call). All
+Because GitHub Actions runners are ephemeral, the snapshot (price targets and
+`lastRecAlert` dedup keys) is persisted between runs via **`actions/cache`**. All
 config comes from GitHub Actions secrets matching the env var names.

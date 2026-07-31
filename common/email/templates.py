@@ -126,20 +126,20 @@ def link_button(text: str, url: str) -> str:
 
 def metric_tile(
     label: str,
-    value: str,
+    actual: str,
     estimate: str,
     badge_text: str = "",
     badge_kind: str = "neutral",
     surprise: str = "",
 ) -> str:
-    """Centered metric cell — large actual value, muted estimate, optional beat/miss badge."""
-    badge_html = badge(badge_text, badge_kind) if badge_text else ""
+    """Single metric cell: large actual value, label, estimate, optional surprise, beat/miss badge."""
+    badge_html = badge(badge_text, badge_kind) if badge_text and badge_text != "—" else ""
     surprise_html = surprise_line(surprise) if surprise else ""
     return (
-        f'<div style="text-align:center;padding:14px 10px;background-color:{METRIC_BG};'
-        f'border-radius:8px;">'
+        f'<div style="background-color:{METRIC_BG};border-radius:8px;padding:14px 12px;'
+        f'text-align:center;">'
         f'<div style="font-size:22px;font-weight:700;color:{ACCENT};margin:0 0 4px 0;">'
-        f"{esc(value)}</div>"
+        f"{esc(actual)}</div>"
         f'<div style="font-size:13px;color:{MUTED};margin:0 0 2px 0;">{esc(label)}</div>'
         f'<div style="font-size:12px;color:{MUTED};margin:0 0 4px 0;">Est: {esc(estimate)}</div>'
         f"{surprise_html}"
@@ -156,21 +156,25 @@ def surprise_line(text: str) -> str:
     )
 
 
-def metrics_row(*tiles: str) -> str:
-    """Two-column table row of :func:`metric_tile` cells (Outlook-safe side-by-side layout)."""
+def metric_row(*tiles: str) -> str:
+    """Place metric tiles side-by-side in a table row (email-safe two-column layout)."""
     cells = "".join(
-        f'<td width="50%" style="width:50%;padding:0 6px;vertical-align:top;">{tile}</td>'
+        f'<td width="50%" style="width:50%;padding:0 4px;vertical-align:top;">{tile}</td>'
         for tile in tiles
     )
     return (
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="width:100%;border-collapse:collapse;">'
+        f'style="width:100%;border-collapse:collapse;margin:0 0 4px 0;">'
         f"<tr>{cells}</tr></table>"
     )
 
 
+# Backward-compatible alias used by older agent code paths.
+metrics_row = metric_row
+
+
 def news_item(headline: str, url: str) -> str:
-    """Linked headline with a subtle divider — for recent-news lists inside a card."""
+    """Bordered news row with a linked headline."""
     return (
         f'<div style="padding:10px 0;border-bottom:1px solid {BORDER};">'
         f'<a href="{esc(url)}" style="color:{LINK};text-decoration:none;font-size:15px;'
