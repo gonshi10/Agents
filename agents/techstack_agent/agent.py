@@ -19,7 +19,12 @@ from common.email import templates as et
 from common.email.sender import EmailSender
 from common.watchlist import load_companies
 
-from .prompts import BATCH_TEMPLATE_HEADER, SYSTEM_PROMPT
+from .prompts import (
+    BATCH_TEMPLATE_HEADER,
+    MARKET_OVERVIEW_TEMPLATE,
+    SINGLE_TECHNOLOGY_TEMPLATE,
+    SYSTEM_PROMPT,
+)
 
 TECH_KEYWORDS: dict[str, list[str]] = {
     # Web & Backend Frameworks
@@ -654,6 +659,48 @@ TECH_CATEGORY_MAP: dict[str, str] = {
     tech: category for category, technologies in TECH_CATEGORY_SETS.items() for tech in technologies
 }
 
+CATEGORY_EXPERT_MAP: dict[str, str] = {
+    "WebAndBackend": "Web & Backend Specialist",
+    "DataPlatforms": "Data Infrastructure Analyst",
+    "CloudInfraDevOps": "Cloud & DevOps Specialist",
+    "DataEngineeringAnalytics": "Data Engineering Analyst",
+    "AIAndML": "AI/ML Platform Analyst",
+    "BioAndLifeSciences": "Life Sciences Tech Analyst",
+    "Quantum": "Quantum Computing Analyst",
+    "SimulationAndHPC": "HPC & Simulation Analyst",
+    "Cybersecurity": "Cybersecurity Specialist",
+    "RoboticsAndEmbedded": "Robotics & Embedded Systems Analyst",
+    "ComputerVision": "Computer Vision Analyst",
+    "Geospatial": "Geospatial Tech Analyst",
+    "Web3AndBlockchain": "Web3 & Blockchain Analyst",
+    "AudioAndSignal": "Audio & Signal Processing Analyst",
+    "FinanceAndQuant": "Quantitative Finance Analyst",
+    "Mobile": "Mobile Platform Analyst",
+    "Testing": "QA & Testing Specialist",
+    "GeneralTech": "Enterprise Technology Analyst",
+}
+
+CATEGORY_DISPLAY_NAMES: dict[str, str] = {
+    "WebAndBackend": "Web & Backend",
+    "DataPlatforms": "Data Platforms",
+    "CloudInfraDevOps": "Cloud & DevOps",
+    "DataEngineeringAnalytics": "Data Engineering & Analytics",
+    "AIAndML": "AI & ML",
+    "BioAndLifeSciences": "Life Sciences",
+    "Quantum": "Quantum Computing",
+    "SimulationAndHPC": "HPC & Simulation",
+    "Cybersecurity": "Cybersecurity",
+    "RoboticsAndEmbedded": "Robotics & Embedded",
+    "ComputerVision": "Computer Vision",
+    "Geospatial": "Geospatial",
+    "Web3AndBlockchain": "Web3 & Blockchain",
+    "AudioAndSignal": "Audio & Signal",
+    "FinanceAndQuant": "Finance & Quant",
+    "Mobile": "Mobile",
+    "Testing": "Testing & QA",
+    "GeneralTech": "General Tech",
+}
+
 SNAPSHOT_VERSION = 2
 
 
@@ -682,6 +729,7 @@ class TechstackAgent:
             else None
         )
         self._compiled_patterns: dict[str, list[re.Pattern[str]]] | None = None
+        self._company_sector_lookup: dict[str, str] = {}
 
         print("✓ Configuration loaded successfully")
         if self.client:
@@ -825,6 +873,140 @@ class TechstackAgent:
             bucket.pop("avg_deltas", None)
         return summary
 
+    @staticmethod
+    def get_category_expert(category: str) -> str:
+        return CATEGORY_EXPERT_MAP.get(category, "Enterprise Technology Analyst")
+
+    @staticmethod
+    def get_category_display_name(category: str) -> str:
+        return CATEGORY_DISPLAY_NAMES.get(category, category.replace("_", " "))
+
+    @staticmethod
+    def build_company_sector_lookup(companies: list[dict[str, Any]]) -> dict[str, str]:
+        lookup: dict[str, str] = {}
+        for company in companies:
+            name = str(company.get("company", "")).strip()
+            sector = str(company.get("sector") or "Unknown").strip()
+            if name:
+                lookup[name] = sector
+                lookup[name.lower()] = sector
+        return lookup
+
+    @staticmethod
+    def summarize_adopter_sectors(signal: dict[str, Any], lookup: dict[str, str]) -> str:
+        companies = signal.get("rising", []) + signal.get("new", []) + signal.get("falling", [])
+        sector_counts: dict[str, int] = {}
+        for company in companies:
+            sector = lookup.get(str(company), lookup.get(str(company).lower(), "Unknown"))
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        if not sector_counts:
+            return "None"
+        return ", ".join(
+            f"{sector} ({count})"
+            for sector, count in sorted(sector_counts.items(), key=lambda item: (-item[1], item[0]))
+        )
+
+    @staticmethod
+    def _format_category_momentum(category_summary: dict[str, dict[str, Any]]) -> str:
+        lines: list[str] = []
+        for category, bucket in sorted(category_summary.items()):
+            lines.append(
+                f"- {category}: {bucket['rising']} rising, {bucket['new']} new, "
+                f"{bucket['falling']} falling, {bucket['market_wide']} market-wide"
+            )
+        return "\n".join(lines) if lines else "No category momentum detected."
+
+    @staticmethod
+    def _is_meaningful_insight(text: str) -> bool:
+        if not text or len(text.strip()) < 40:
+            return False
+        lowered = text.lower()
+        list_markers = ["rising at", "new at", "falling at", "rising:", "new:", "falling:"]
+        if sum(1 for marker in list_markers if marker in lowered) >= 2:
+            return False
+        mechanism_keywords = [
+            "suggest",
+            "signal",
+            "indicate",
+            "implies",
+            "because",
+            "driver",
+            "demand",
+            "shift",
+            "position",
+            "competitive",
+            "revenue",
+            "adoption",
+            "vendor",
+            "platform",
+        ]
+        return any(keyword in lowered for keyword in mechanism_keywords)
+
+    @staticmethod
+    def _parse_investment_view(raw: str) -> dict[str, str]:
+        text = raw.strip()
+        if not text or text.upper() == "N/A":
+            return {"rating": "WATCH", "reasoning": ""}
+
+        reasoning = ""
+        for sep in (" - ", " – ", " — ", ": "):
+            if sep in text:
+                parts = text.split(sep, 1)
+                if parts[1].strip():
+                    reasoning = parts[1].strip()
+                    break
+
+        upper = text.upper()
+        rating = "WATCH"
+        for candidate in ("AVOID", "BUY", "WATCH"):
+            if upper.startswith(candidate):
+                rating = candidate
+                break
+        else:
+            for candidate in ("AVOID", "BUY", "WATCH"):
+                if candidate in upper:
+                    rating = candidate
+                    break
+
+        if not reasoning and rating in text.upper():
+            remainder = text.upper().replace(rating, "", 1).strip(" -–—:")
+            if remainder:
+                reasoning = remainder
+
+        return {"rating": rating, "reasoning": reasoning}
+
+    @staticmethod
+    def _parse_confidence(raw: str) -> dict[str, str]:
+        text = raw.strip()
+        if not text or text.upper() == "N/A":
+            return {"level": "", "reason": ""}
+
+        upper = text.upper()
+        level = ""
+        for candidate in ("HIGH", "MEDIUM", "LOW"):
+            if candidate in upper:
+                level = candidate
+                break
+
+        reason = text
+        for sep in (" - ", " – ", " — "):
+            if sep in text:
+                reason = text.split(sep, 1)[1].strip()
+                break
+        if level and text.upper().startswith(level):
+            reason = text[len(level) :].strip(" -–—:")
+
+        return {"level": level, "reason": reason}
+
+    @staticmethod
+    def _investment_badge_kind(rating: str) -> str:
+        normalized = rating.upper()
+        if normalized == "BUY":
+            return "up"
+        if normalized == "AVOID":
+            return "down"
+        return "neutral"
+
     def _load_snapshot(self) -> dict[str, dict[str, Any]]:
         try:
             if self.snapshot_path.exists():
@@ -861,18 +1043,18 @@ class TechstackAgent:
     @staticmethod
     def _blank_insight() -> dict[str, str]:
         return {
-            "vendor_and_product": "",
-            "adoption_signal": "",
-            "investment_thesis": "",
+            "sector_read": "",
+            "investment_view": "",
             "confidence": "MEDIUM - No explicit confidence provided.",
+            "expert_recommendation": "",
         }
 
     def _disabled_insight(self) -> dict[str, str]:
         return {
-            "vendor_and_product": "AI insights disabled - set OPENAI_API_KEY to enable.",
-            "adoption_signal": "",
-            "investment_thesis": "",
+            "sector_read": "AI insights disabled - set OPENAI_API_KEY to enable.",
+            "investment_view": "",
             "confidence": "N/A",
+            "expert_recommendation": "",
         }
 
     def parse_structured_insights(
@@ -883,28 +1065,29 @@ class TechstackAgent:
             return results
 
         tech_lookup = {tech.lower(): tech for tech in technologies}
-        current_tech: str | None = None
+        current_tech: str | None = technologies[0] if len(technologies) == 1 else None
         current_section: str | None = None
         section_buffer: list[str] = []
+        saw_tech_header = False
 
         def flush() -> None:
             if current_tech and current_section and section_buffer:
                 joined = " ".join(section_buffer).strip()
                 if joined:
                     results[current_tech][current_section] = joined
+                section_buffer.clear()
 
         for raw in response_text.splitlines():
             line = raw.strip()
             if not line:
                 flush()
-                section_buffer = []
                 continue
             upper = line.upper()
 
             if upper.startswith("TECHNOLOGY:"):
                 flush()
-                section_buffer = []
                 current_section = None
+                saw_tech_header = True
                 raw_name = line.split(":", 1)[1].strip().lower()
                 current_tech = tech_lookup.get(raw_name)
                 if not current_tech:
@@ -914,37 +1097,65 @@ class TechstackAgent:
                             break
                 continue
 
-            if "VENDOR & PRODUCT" in upper or "VENDOR AND PRODUCT" in upper:
+            if "SECTOR READ" in upper:
                 flush()
-                current_section = "vendor_and_product"
+                current_section = "sector_read"
                 section_buffer = []
-            elif "ADOPTION SIGNAL" in upper:
+                if ":" in line:
+                    content = line.split(":", 1)[1].strip()
+                    if content:
+                        section_buffer.append(content)
+            elif "INVESTMENT VIEW" in upper:
                 flush()
-                current_section = "adoption_signal"
+                current_section = "investment_view"
                 section_buffer = []
-            elif "INVESTMENT THESIS" in upper:
-                flush()
-                current_section = "investment_thesis"
-                section_buffer = []
+                if ":" in line:
+                    content = line.split(":", 1)[1].strip()
+                    if content:
+                        section_buffer.append(content)
             elif upper.startswith("CONFIDENCE"):
                 flush()
                 current_section = "confidence"
                 section_buffer = []
-            elif current_section:
+                if ":" in line:
+                    content = line.split(":", 1)[1].strip()
+                    if content:
+                        section_buffer.append(content)
+            elif "EXPERT RECOMMENDATION" in upper:
+                flush()
+                current_section = None
+                if current_tech and ":" in line:
+                    value = line.split(":", 1)[1].strip()
+                    if value:
+                        results[current_tech]["expert_recommendation"] = value
+            elif current_section and current_tech:
                 section_buffer.append(line)
-                continue
-
-            if ":" in line and current_section:
-                after_colon = line.split(":", 1)[1].strip()
-                if after_colon:
-                    section_buffer.append(after_colon)
 
         flush()
+
+        if len(technologies) == 1 and not saw_tech_header:
+            single = results[technologies[0]]
+            if not single["sector_read"] and not single["investment_view"]:
+                single["sector_read"] = response_text[:500]
+
         return results
 
-    def _build_batch_context(self, signals: dict[str, dict[str, Any]]) -> str:
-        blocks: list[str] = [BATCH_TEMPLATE_HEADER, ""]
+    def _build_batch_context(
+        self,
+        signals: dict[str, dict[str, Any]],
+        category_summary: dict[str, dict[str, Any]],
+    ) -> str:
+        blocks: list[str] = [
+            BATCH_TEMPLATE_HEADER,
+            "",
+            "CATEGORY MOMENTUM:",
+            self._format_category_momentum(category_summary),
+            "",
+        ]
         for tech, signal in sorted(signals.items()):
+            category = str(signal.get("category", "GeneralTech"))
+            expert_type = self.get_category_expert(category)
+            adopter_sectors = self.summarize_adopter_sectors(signal, self._company_sector_lookup)
             rising = ", ".join(signal.get("rising", [])) or "None"
             new = ", ".join(signal.get("new", [])) or "None"
             falling = ", ".join(signal.get("falling", [])) or "None"
@@ -952,14 +1163,14 @@ class TechstackAgent:
                 "\n".join(
                     [
                         f"TECHNOLOGY: {tech}",
-                        f"CATEGORY: {signal.get('category', 'GeneralTech')}",
+                        f"CATEGORY: {category}",
+                        f"SECTOR EXPERT: {expert_type}",
+                        f"ADOPTER SECTORS: {adopter_sectors}",
                         f"RISING AT: {rising}",
                         f"NEW AT: {new}",
                         f"FALLING AT: {falling}",
                         f"AVG SHARE DELTA: {signal.get('avg_delta', 0.0)}",
                         f"MARKET-WIDE SIGNAL: {'YES' if signal.get('market_wide') else 'NO'}",
-                        "QUESTION: Who is the vendor behind this technology, which tracked",
-                        "employers are adopting or dropping it, and what should an investor do now?",
                         "",
                     ]
                 )
@@ -970,20 +1181,17 @@ class TechstackAgent:
         if not self.openai.is_enabled:
             return self._disabled_insight()
 
-        rising = ", ".join(signal.get("rising", [])) or "None"
-        new = ", ".join(signal.get("new", [])) or "None"
-        falling = ", ".join(signal.get("falling", [])) or "None"
-        context = (
-            f"TECHNOLOGY: {tech}\n"
-            f"CATEGORY: {signal.get('category', 'GeneralTech')}\n"
-            f"RISING AT: {rising}\n"
-            f"NEW AT: {new}\n"
-            f"FALLING AT: {falling}\n\n"
-            "Format:\n"
-            "VENDOR & PRODUCT: ...\n"
-            "ADOPTION SIGNAL: ...\n"
-            "INVESTMENT THESIS: ...\n"
-            "CONFIDENCE: ...\n"
+        category = str(signal.get("category", "GeneralTech"))
+        context = SINGLE_TECHNOLOGY_TEMPLATE.format(
+            technology=tech,
+            category=category,
+            expert_type=self.get_category_expert(category),
+            adopter_sectors=self.summarize_adopter_sectors(signal, self._company_sector_lookup),
+            rising=", ".join(signal.get("rising", [])) or "None",
+            new=", ".join(signal.get("new", [])) or "None",
+            falling=", ".join(signal.get("falling", [])) or "None",
+            avg_delta=signal.get("avg_delta", 0.0),
+            market_wide="YES" if signal.get("market_wide") else "NO",
         )
         try:
             content = self.openai.complete(
@@ -994,14 +1202,16 @@ class TechstackAgent:
             return self.parse_structured_insights(content, [tech]).get(tech, self._blank_insight())
         except Exception as exc:
             return {
-                "vendor_and_product": f"AI insights unavailable: {exc}",
-                "adoption_signal": "",
-                "investment_thesis": "",
+                "sector_read": f"AI insights unavailable: {exc}",
+                "investment_view": "",
                 "confidence": "N/A",
+                "expert_recommendation": "",
             }
 
     def generate_batched_ai_insights(
-        self, signals: dict[str, dict[str, Any]]
+        self,
+        signals: dict[str, dict[str, Any]],
+        category_summary: dict[str, dict[str, Any]],
     ) -> dict[str, dict[str, str]]:
         technologies = sorted(signals.keys())
         if not technologies:
@@ -1010,11 +1220,11 @@ class TechstackAgent:
             return {tech: self._disabled_insight() for tech in technologies}
 
         def primary() -> dict[str, dict[str, str]]:
-            context = self._build_batch_context(signals)
+            context = self._build_batch_context(signals, category_summary)
             content = self.openai.complete(
                 system_prompt=SYSTEM_PROMPT,
                 user_prompt=context,
-                max_tokens=700 * max(1, min(len(technologies), 6)),
+                max_tokens=500 * max(1, min(len(technologies), 8)),
             )
             return self.parse_structured_insights(content, technologies)
 
@@ -1025,95 +1235,189 @@ class TechstackAgent:
 
         return self.openai.run_with_fallback(primary, fallback)
 
+    def generate_market_overview(
+        self,
+        signals: dict[str, dict[str, Any]],
+        category_summary: dict[str, dict[str, Any]],
+    ) -> str:
+        if not self.openai.is_enabled or not signals:
+            return ""
+
+        ordered = sorted(
+            signals.items(),
+            key=lambda item: (item[1].get("market_wide", False), item[1].get("avg_delta", 0.0)),
+            reverse=True,
+        )[:5]
+        top_signal_lines = [
+            (
+                f"- {tech} ({signal.get('category', 'GeneralTech')}): "
+                f"avg delta {signal.get('avg_delta', 0.0)} pts, "
+                f"market-wide={'yes' if signal.get('market_wide') else 'no'}"
+            )
+            for tech, signal in ordered
+        ]
+        context = MARKET_OVERVIEW_TEMPLATE.format(
+            category_summary=self._format_category_momentum(category_summary),
+            top_signals="\n".join(top_signal_lines) or "No top signals",
+        )
+        try:
+            return self.openai.complete(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=context,
+                max_tokens=200,
+            ).strip()
+        except Exception as exc:
+            print(f"⚠️ Market overview generation failed: {exc}")
+            return ""
+
     def create_digest_email(
         self,
         signals: dict[str, dict[str, Any]],
         insights: dict[str, dict[str, str]],
+        market_overview: str = "",
     ) -> tuple[str, str, str]:
         n = len(signals)
         subject = f"Monthly tech trends — {n} signal{'s' if n != 1 else ''}"
-
-        html_cards: list[str] = []
-        plain_blocks: list[str] = []
 
         ordered = sorted(
             signals.items(),
             key=lambda item: (item[1].get("market_wide", False), item[1].get("avg_delta", 0.0)),
             reverse=True,
         )
-        for tech, signal in ordered:
-            insight = insights.get(tech, self._blank_insight())
-            badges: list[str] = []
-            for company in signal.get("rising", []):
-                badges.append(et.badge(f"Rising: {company}", "up"))
-            for company in signal.get("new", []):
-                badges.append(et.badge(f"New: {company}", "up"))
-            for company in signal.get("falling", []):
-                badges.append(et.badge(f"Falling: {company}", "down"))
+        category_summary = self.summarize_category_momentum(signals)
+        shown = min(n, 8)
 
-            card_body = et.section(
-                "Vendor & Product",
-                insight.get("vendor_and_product", "No vendor analysis available."),
+        html_cards: list[str] = []
+        plain_blocks: list[str] = []
+
+        for tech, signal in ordered[:shown]:
+            insight = insights.get(tech, self._blank_insight())
+            category = str(signal.get("category", "GeneralTech"))
+            category_label = self.get_category_display_name(category)
+
+            parsed_view = self._parse_investment_view(insight.get("investment_view", ""))
+            parsed_confidence = self._parse_confidence(insight.get("confidence", ""))
+            expert = insight.get("expert_recommendation") or self.get_category_expert(category)
+
+            meta_chips = et.stat_chip("Category", category_label, "neutral")
+            if signal.get("market_wide"):
+                meta_chips += et.stat_chip("Market-wide", "Yes", "up")
+            meta_chips += et.stat_chip(
+                "Avg delta",
+                f"{signal.get('avg_delta', 0.0)} pts",
+                "up" if float(signal.get("avg_delta", 0.0) or 0.0) > 0 else "neutral",
             )
-            if badges:
-                card_body += et.section("Adoption at Tracked Companies", "".join(badges))
-            card_body += et.key_value("Market-Wide", "Yes" if signal.get("market_wide") else "No")
-            card_body += et.key_value("Average Share Delta", f"{signal.get('avg_delta', 0.0)} pts")
-            if insight.get("adoption_signal"):
-                card_body += et.section("Adoption Signal", insight["adoption_signal"])
-            if insight.get("investment_thesis"):
-                card_body += et.section("Investment Thesis", insight["investment_thesis"])
-            card_body += et.key_value("Confidence", insight.get("confidence", "N/A"))
+
+            adoption_parts: list[str] = []
+            rising = signal.get("rising", [])
+            new = signal.get("new", [])
+            falling = signal.get("falling", [])
+            if rising:
+                adoption_parts.append(
+                    et.badge_row("Rising", "".join(et.badge(company, "up") for company in rising))
+                )
+            if new:
+                adoption_parts.append(
+                    et.badge_row("New", "".join(et.badge(company, "up") for company in new))
+                )
+            if falling:
+                adoption_parts.append(
+                    et.badge_row(
+                        "Falling", "".join(et.badge(company, "down") for company in falling)
+                    )
+                )
+
+            card_body = (
+                f'<div style="font-size:13px;color:{et.MUTED};margin:0 0 14px 0;">{meta_chips}</div>'
+                + "".join(adoption_parts)
+            )
+            if adoption_parts:
+                card_body += et.divider()
+            card_body += et.verdict_block(
+                rating=parsed_view["rating"],
+                confidence=parsed_confidence["level"],
+                expert=expert,
+                conclusion=parsed_view["reasoning"],
+                reasoning=parsed_confidence["reason"],
+                badge_kind=self._investment_badge_kind(parsed_view["rating"]),
+            )
+
+            sector_read = insight.get("sector_read", "")
+            if sector_read and self._is_meaningful_insight(sector_read):
+                card_body += et.callout(et.section("Sector Read", sector_read))
+
             html_cards.append(et.card(card_body, title=tech))
 
             plain_blocks.append(
                 "\n".join(
                     [
-                        f"{tech}",
-                        f"  Vendor & product: {insight.get('vendor_and_product', '')}",
-                        f"  Rising: {', '.join(signal.get('rising', [])) or 'None'}",
-                        f"  New: {', '.join(signal.get('new', [])) or 'None'}",
-                        f"  Falling: {', '.join(signal.get('falling', [])) or 'None'}",
-                        f"  Adoption signal: {insight.get('adoption_signal', '')}",
-                        f"  Thesis: {insight.get('investment_thesis', '')}",
+                        f"{tech} ({category_label})",
+                        f"  Rising: {', '.join(rising) or 'None'}",
+                        f"  New: {', '.join(new) or 'None'}",
+                        f"  Falling: {', '.join(falling) or 'None'}",
+                        f"  Investment view: {insight.get('investment_view', 'WATCH')}",
+                        f"  Sector read: {sector_read}",
+                        f"  Expert: {expert}",
                         f"  Confidence: {insight.get('confidence', 'N/A')}",
                     ]
                 )
             )
 
-        generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        top_mover_rows: list[str] = []
-        top_mover_plain: list[str] = []
-        for tech, signal in ordered[:8]:
-            employers = (
-                signal.get("rising", []) + signal.get("new", []) + signal.get("falling", [])
+        category_rows: list[str] = []
+        category_plain: list[str] = []
+        sorted_categories = sorted(category_summary.items())
+        for index, (category, bucket) in enumerate(sorted_categories):
+            display_name = self.get_category_display_name(category)
+            row = et.momentum_row(
+                display_name,
+                bucket["rising"],
+                bucket["new"],
+                bucket["falling"],
+                bucket["market_wide"],
+                show_border=index < len(sorted_categories) - 1,
             )
-            summary = ", ".join(employers[:4]) + ("…" if len(employers) > 4 else "")
-            top_mover_rows.append(
-                et.key_value(tech, f"Avg delta {signal.get('avg_delta', 0.0)} pts — {summary or 'N/A'}")
-            )
-            top_mover_plain.append(
-                f"{tech}: avg delta {signal.get('avg_delta', 0.0)} pts — {summary or 'N/A'}"
+            category_rows.append(row)
+            category_plain.append(
+                f"{display_name}: {bucket['rising']} rising, {bucket['new']} new, "
+                f"{bucket['falling']} falling, {bucket['market_wide']} market-wide"
             )
 
-        html_content = et.page(
-            "Monthly Tech Trends",
-            [
-                et.header("Monthly Tech Trends", f"{n} technology trend(s) this month"),
-                et.card("".join(top_mover_rows), title="Top Movers This Month"),
-                *html_cards,
-                et.footer(f"Generated on {generated}"),
-            ],
+        generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        header_subtitle = (
+            f"{n} signal{'s' if n != 1 else ''} · "
+            f"{len(category_summary)} categor{'ies' if len(category_summary) != 1 else 'y'} · "
+            "monthly digest"
         )
+        blocks: list[str] = [
+            et.header("Monthly Tech Trends", header_subtitle),
+        ]
+        if market_overview:
+            blocks.append(et.overview_block("This Month at a Glance", et.esc(market_overview)))
+        if category_rows:
+            blocks.append(et.card("".join(category_rows), title="Category Momentum"))
+        blocks.append(et.section_heading(f"Top Signals ({shown} of {n})"))
+        blocks.extend(html_cards)
+
+        footer_text = f"Generated on {generated}"
+        if n > shown:
+            footer_text += f" · Showing top {shown} of {n} signals by momentum"
+        blocks.append(et.footer(footer_text))
+
+        html_content = et.page("Monthly Tech Trends", blocks)
         plain_content = (
             "MONTHLY TECH TRENDS\n"
             "===================\n\n"
-            + "TOP MOVERS THIS MONTH\n"
-            + "---------------------\n"
-            + ("\n".join(top_mover_plain) if top_mover_plain else "No trends detected.")
+            + header_subtitle
             + "\n\n"
+            + (f"THIS MONTH AT A GLANCE\n{market_overview}\n\n" if market_overview else "")
+            + "CATEGORY MOMENTUM\n"
+            + "-----------------\n"
+            + ("\n".join(category_plain) if category_plain else "No category momentum detected.")
+            + "\n\n"
+            + f"TOP SIGNALS ({shown} of {n})\n"
+            + "--------------------\n"
             + "\n\n".join(plain_blocks)
-            + f"\n\nGenerated on {generated}\n"
+            + f"\n\n{footer_text}\n"
         )
         return subject, html_content, plain_content
 
@@ -1171,8 +1475,13 @@ class TechstackAgent:
             return
 
         signals = self.detect_cross_company_trends(company_trends)
-        insights = self.generate_batched_ai_insights(signals)
-        subject, html_content, plain_content = self.create_digest_email(signals, insights)
+        self._company_sector_lookup = self.build_company_sector_lookup(companies)
+        category_summary = self.summarize_category_momentum(signals)
+        market_overview = self.generate_market_overview(signals, category_summary)
+        insights = self.generate_batched_ai_insights(signals, category_summary)
+        subject, html_content, plain_content = self.create_digest_email(
+            signals, insights, market_overview=market_overview
+        )
         if self.email_sender.send(subject, html_content, plain_content):
             print(f"🎉 Sent 1 digest email covering {len(signals)} technology trend(s)")
         else:

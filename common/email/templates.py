@@ -115,6 +115,66 @@ def badge(text: str, kind: str = "neutral") -> str:
     )
 
 
+def badge_row(label: str, badges_html: str) -> str:
+    """Uppercase label followed by pre-built badge HTML (badges must not be double-escaped)."""
+    if not badges_html:
+        return ""
+    return (
+        f'<div style="margin:0 0 14px 0;">'
+        f'<div style="font-size:13px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:0.4px;color:{MUTED};margin:0 0 4px 0;">{esc(label)}</div>'
+        f"<div>{badges_html}</div></div>"
+    )
+
+
+def stat_chip(label: str, value: str, kind: str = "neutral") -> str:
+    """Compact inline stat pill for metadata rows (e.g. avg delta, counts)."""
+    fg, bg = _BADGE_COLORS.get(kind, _BADGE_COLORS["neutral"])
+    return (
+        f'<span style="display:inline-block;background-color:{bg};color:{fg};'
+        f'padding:4px 10px;border-radius:12px;font-size:12px;font-weight:600;'
+        f'margin:0 6px 4px 0;">'
+        f'<span style="font-weight:500;">{esc(label)}:</span> {esc(value)}</span>'
+    )
+
+
+def section_heading(text: str) -> str:
+    """Muted uppercase zone label between major digest sections."""
+    return (
+        f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:0.6px;color:{MUTED};margin:4px 0 12px 0;">{esc(text)}</div>'
+    )
+
+
+def momentum_row(
+    category: str,
+    rising: int,
+    new: int,
+    falling: int,
+    market_wide: int,
+    *,
+    show_border: bool = True,
+) -> str:
+    """One category row with human-readable label and colored count chips."""
+    chips = (
+        stat_chip("Rising", str(rising), "up" if rising else "neutral")
+        + stat_chip("New", str(new), "up" if new else "neutral")
+        + stat_chip("Falling", str(falling), "down" if falling else "neutral")
+        + stat_chip("Market-wide", str(market_wide), "up" if market_wide else "neutral")
+    )
+    border = f"border-bottom:1px solid {BORDER};" if show_border else ""
+    return (
+        f'<div style="margin:0 0 12px 0;padding:0 0 12px 0;{border}">'
+        f'<div style="font-size:15px;font-weight:600;color:{ACCENT};margin:0 0 8px 0;">'
+        f"{esc(category)}</div>{chips}</div>"
+    )
+
+
+def overview_block(title: str, body: str) -> str:
+    """Card-wrapped intro block with a callout body (``body`` is raw HTML)."""
+    return card(callout(body), title=title)
+
+
 def link_button(text: str, url: str) -> str:
     """Accent call-to-action button (a styled anchor — buttons aren't email-safe)."""
     return (

@@ -113,6 +113,175 @@ def test_detection_logic() -> bool:
         return False
 
 
+def test_batch_parser_splits_technologies() -> bool:
+    print("\nTesting batch parser splits technologies...")
+    try:
+        from agents.techstack_agent.agent import TechstackAgent
+
+        agent = TechstackAgent.__new__(TechstackAgent)
+        mock_response = """
+TECHNOLOGY: Kubernetes
+SECTOR READ: CNCF-backed orchestration platform; multi-employer hiring signals durable platform spend.
+INVESTMENT VIEW: WATCH - Cloud-native shift supports infra vendors more than a single ticker.
+CONFIDENCE: MEDIUM - Multiple employers but limited posting sample.
+EXPERT RECOMMENDATION: Cloud & DevOps Specialist
+
+TECHNOLOGY: Kafka
+SECTOR READ: Confluent monetizes stream processing; rising mentions imply pipeline modernization budgets.
+INVESTMENT VIEW: BUY - Enterprise data motion budgets are expanding into real-time stacks.
+CONFIDENCE: HIGH - Market-wide adoption across sectors.
+EXPERT RECOMMENDATION: Data Infrastructure Analyst
+"""
+        parsed = agent.parse_structured_insights(mock_response, ["Kubernetes", "Kafka"])
+        k8s = parsed["Kubernetes"]
+        kafka = parsed["Kafka"]
+
+        if k8s["sector_read"] == kafka["sector_read"]:
+            print("✗ Batch parser returned identical sector reads for different technologies")
+            return False
+        if "orchestration" not in k8s["sector_read"].lower():
+            print(f"✗ Kubernetes sector_read missing expected content: {k8s['sector_read']!r}")
+            return False
+        if "BUY" not in kafka["investment_view"].upper():
+            print(f"✗ Kafka investment_view missing BUY: {kafka['investment_view']!r}")
+            return False
+        if "Data Infrastructure Analyst" not in kafka["expert_recommendation"]:
+            print(
+                f"✗ Kafka expert_recommendation missing expected expert: "
+                f"{kafka['expert_recommendation']!r}"
+            )
+            return False
+        print("✓ Batch parser returns distinct insights per technology")
+        return True
+    except Exception as exc:
+        print(f"✗ Batch parser test failed: {exc}")
+        return False
+
+
+def test_email_badges_not_escaped() -> bool:
+    print("\nTesting email badge HTML rendering...")
+    try:
+        from agents.techstack_agent.agent import TechstackAgent
+
+        agent = TechstackAgent.__new__(TechstackAgent)
+        signals = {
+            "Kubernetes": {
+                "category": "CloudInfraDevOps",
+                "rising": ["Apple"],
+                "new": ["Stripe"],
+                "falling": [],
+                "avg_delta": 12.5,
+                "market_wide": True,
+            }
+        }
+        insights = {
+            "Kubernetes": {
+                "sector_read": (
+                    "CNCF-backed orchestration platform signals durable cloud-native platform spend "
+                    "across large employers."
+                ),
+                "investment_view": "WATCH - Infra modernization supports platform vendors broadly.",
+                "confidence": "MEDIUM - Strong cross-employer signal.",
+                "expert_recommendation": "Cloud & DevOps Specialist",
+            }
+        }
+        _, html_content, _ = agent.create_digest_email(signals, insights, market_overview="")
+        if "&lt;span" in html_content:
+            print("✗ Email HTML contains escaped badge markup")
+            return False
+        if "Apple" not in html_content:
+            print("✗ Email HTML missing rendered company badge text")
+            return False
+        if '<span style="display:inline-block;' not in html_content:
+            print("✗ Email HTML missing rendered badge span")
+            return False
+        print("✓ Email badges render as HTML, not escaped text")
+        return True
+    except Exception as exc:
+        print(f"✗ Email badge HTML test failed: {exc}")
+        return False
+
+
+def test_email_layout_structure() -> bool:
+    print("\nTesting email layout structure...")
+    try:
+        from common.email import templates as et
+        from agents.techstack_agent.agent import TechstackAgent
+
+        et.section_heading("x")
+        et.momentum_row("Data Platforms", 1, 0, 0, 1)
+
+        agent = TechstackAgent.__new__(TechstackAgent)
+        signals = {
+            "Kubernetes": {
+                "category": "CloudInfraDevOps",
+                "rising": ["Apple"],
+                "new": [],
+                "falling": [],
+                "avg_delta": 12.5,
+                "market_wide": True,
+            },
+            "Kafka": {
+                "category": "DataPlatforms",
+                "rising": ["Microsoft"],
+                "new": [],
+                "falling": [],
+                "avg_delta": 8.0,
+                "market_wide": False,
+            },
+        }
+        insights = {
+            "Kubernetes": {
+                "sector_read": (
+                    "CNCF-backed orchestration platform signals durable cloud-native platform spend "
+                    "across large employers."
+                ),
+                "investment_view": "WATCH - Infra modernization supports platform vendors broadly.",
+                "confidence": "MEDIUM - Strong cross-employer signal.",
+                "expert_recommendation": "Cloud & DevOps Specialist",
+            },
+            "Kafka": {
+                "sector_read": (
+                    "Confluent monetizes stream processing and rising mentions imply pipeline "
+                    "modernization budgets across enterprise data teams."
+                ),
+                "investment_view": "BUY - Real-time data motion budgets are expanding.",
+                "confidence": "HIGH - Cross-sector adoption signal.",
+                "expert_recommendation": "Data Infrastructure Analyst",
+            },
+        }
+        overview = "Cloud and data platform hiring accelerated across tracked employers this month."
+        _, html_content, plain_content = agent.create_digest_email(
+            signals, insights, market_overview=overview
+        )
+        cloud_devops_html = et.esc("Cloud & DevOps")
+        required_fragments = [
+            "This Month at a Glance",
+            overview,
+            "Top Signals",
+            cloud_devops_html,
+            "Category Momentum",
+        ]
+        for fragment in required_fragments:
+            if fragment not in html_content:
+                print(f"✗ Email HTML missing expected fragment: {fragment!r}")
+                return False
+        if "&lt;span" in html_content:
+            print("✗ Email HTML contains escaped badge markup")
+            return False
+        if "THIS MONTH AT A GLANCE" not in plain_content:
+            print("✗ Plain text missing overview section header")
+            return False
+        if "Cloud & DevOps" not in plain_content:
+            print("✗ Plain text missing human-readable category label")
+            return False
+        print("✓ Email layout includes overview, headings, and readable category labels")
+        return True
+    except Exception as exc:
+        print(f"✗ Email layout structure test failed: {exc}")
+        return False
+
+
 def main() -> int:
     print("=== Techstack Agent Test Suite ===\n")
     tests = [
@@ -121,6 +290,9 @@ def main() -> int:
         ("TechstackAgent Import", test_agent_import),
         ("Company Loading", test_company_loading),
         ("Detection Logic", test_detection_logic),
+        ("Batch Parser", test_batch_parser_splits_technologies),
+        ("Email Badge HTML", test_email_badges_not_escaped),
+        ("Email Layout Structure", test_email_layout_structure),
     ]
     results: list[tuple[str, bool]] = []
     for name, fn in tests:
