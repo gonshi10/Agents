@@ -36,6 +36,11 @@ UP_FG, UP_BG = "#0f5132", "#d1e7dd"
 DOWN_FG, DOWN_BG = "#842029", "#f8d7da"
 NEUTRAL_FG, NEUTRAL_BG = "#383d41", "#e2e3e5"
 
+CALLOUT_BG = "#fff3cd"
+CALLOUT_BORDER = "#ffc107"
+METRIC_BG = "#f8f9fa"
+LINK = "#007bff"
+
 FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif"
 
 _BADGE_COLORS = {
@@ -117,6 +122,122 @@ def link_button(text: str, url: str) -> str:
         f'color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;'
         f'font-size:14px;font-weight:600;margin-top:6px;">{esc(text)}</a>'
     )
+
+
+def metric_tile(
+    label: str,
+    value: str,
+    estimate: str,
+    badge_text: str = "",
+    badge_kind: str = "neutral",
+    surprise: str = "",
+) -> str:
+    """Centered metric cell — large actual value, muted estimate, optional beat/miss badge."""
+    badge_html = badge(badge_text, badge_kind) if badge_text else ""
+    surprise_html = surprise_line(surprise) if surprise else ""
+    return (
+        f'<div style="text-align:center;padding:14px 10px;background-color:{METRIC_BG};'
+        f'border-radius:8px;">'
+        f'<div style="font-size:22px;font-weight:700;color:{ACCENT};margin:0 0 4px 0;">'
+        f"{esc(value)}</div>"
+        f'<div style="font-size:13px;color:{MUTED};margin:0 0 2px 0;">{esc(label)}</div>'
+        f'<div style="font-size:12px;color:{MUTED};margin:0 0 4px 0;">Est: {esc(estimate)}</div>'
+        f"{surprise_html}"
+        f"{badge_html}"
+        f"</div>"
+    )
+
+
+def surprise_line(text: str) -> str:
+    """Muted surprise-vs-estimate line under a metric tile."""
+    return (
+        f'<div style="font-size:12px;color:{MUTED};margin:0 0 8px 0;">'
+        f"{esc(text)}</div>"
+    )
+
+
+def metrics_row(*tiles: str) -> str:
+    """Two-column table row of :func:`metric_tile` cells (Outlook-safe side-by-side layout)."""
+    cells = "".join(
+        f'<td width="50%" style="width:50%;padding:0 6px;vertical-align:top;">{tile}</td>'
+        for tile in tiles
+    )
+    return (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%;border-collapse:collapse;">'
+        f"<tr>{cells}</tr></table>"
+    )
+
+
+def news_item(headline: str, url: str) -> str:
+    """Linked headline with a subtle divider — for recent-news lists inside a card."""
+    return (
+        f'<div style="padding:10px 0;border-bottom:1px solid {BORDER};">'
+        f'<a href="{esc(url)}" style="color:{LINK};text-decoration:none;font-size:15px;'
+        f'line-height:1.5;">{esc(headline)}</a></div>'
+    )
+
+
+def callout(body: str) -> str:
+    """Light accent block for grouped content (e.g. AI insight sections)."""
+    return (
+        f'<div style="background-color:{CALLOUT_BG};border-left:4px solid {CALLOUT_BORDER};'
+        f'padding:16px 18px;border-radius:4px;">{body}</div>'
+    )
+
+
+def divider() -> str:
+    """Horizontal rule for separating sections inside a card."""
+    return f'<div style="border-top:1px solid {BORDER};margin:14px 0;"></div>'
+
+
+def verdict_block(
+    rating: str,
+    confidence: str = "",
+    expert: str = "",
+    conclusion: str = "",
+    reasoning: str = "",
+    badge_kind: str = "neutral",
+) -> str:
+    """Structured verdict layout: rating badge, confidence, expert, conclusion, reasoning."""
+    fg, bg = _BADGE_COLORS.get(badge_kind, _BADGE_COLORS["neutral"])
+    rating_badge = (
+        f'<span style="display:inline-block;background-color:{bg};color:{fg};'
+        f'padding:8px 16px;border-radius:14px;font-size:16px;font-weight:700;'
+        f'margin:0 8px 0 0;">{esc(rating)}</span>'
+    )
+    confidence_html = badge(confidence, "neutral") if confidence else ""
+
+    top_row = (
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="width:100%;border-collapse:collapse;">'
+        f"<tr><td style=\"padding:0;\">{rating_badge}{confidence_html}</td></tr></table>"
+    )
+
+    parts = [top_row]
+    if expert:
+        parts.append(
+            f'<div style="font-size:13px;color:{MUTED};margin:10px 0 0 0;">'
+            f"Reviewed by {esc(expert)}</div>"
+        )
+
+    show_reasoning = bool(reasoning.strip()) and reasoning.strip() != conclusion.strip()
+    if conclusion or show_reasoning:
+        parts.append(divider())
+
+    if conclusion:
+        parts.append(
+            f'<div style="font-size:16px;line-height:1.65;color:{TEXT};margin:0 0 8px 0;">'
+            f"{esc(conclusion)}</div>"
+        )
+
+    if show_reasoning:
+        parts.append(
+            f'<div style="font-size:14px;line-height:1.55;color:{MUTED};margin:0;">'
+            f"{esc(reasoning)}</div>"
+        )
+
+    return "".join(parts)
 
 
 def footer(text: str) -> str:
