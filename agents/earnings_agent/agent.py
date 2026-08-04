@@ -297,7 +297,7 @@ class EarningsAgent:
             if upper.startswith("TICKER:"):
                 raw_name = line.split(":", 1)[1].strip().lower()
                 ticker_from_line = ticker_lookup.get(raw_name)
-                if not ticker_from_line:
+                if not ticker_from_line and raw_name:
                     for low_name, canonical in ticker_lookup.items():
                         if low_name in raw_name or raw_name in low_name:
                             ticker_from_line = canonical
@@ -376,6 +376,13 @@ class EarningsAgent:
 
         return results
 
+    @staticmethod
+    def _insights_incomplete(insights: dict[str, dict[str, str]]) -> bool:
+        return any(
+            not insight.get("summary") and not insight.get("strategic_analysis")
+            for insight in insights.values()
+        )
+
     def generate_ai_insights_single(
         self,
         ticker: str,
@@ -440,7 +447,10 @@ class EarningsAgent:
                 user_prompt=context,
                 max_tokens=900 * max(len(tickers_data), 1),
             )
-            return self.parse_structured_insights(content, list(tickers_data.keys()))
+            parsed = self.parse_structured_insights(content, list(tickers_data.keys()))
+            if self._insights_incomplete(parsed):
+                return self.generate_individual_insights(tickers_data)
+            return parsed
 
         return self.openai.run_with_fallback(primary, lambda: self.generate_individual_insights(tickers_data))
 

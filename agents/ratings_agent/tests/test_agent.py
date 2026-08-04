@@ -111,12 +111,58 @@ def test_detection_logic() -> bool:
         return False
 
 
+def test_batch_parser_splits_tickers() -> bool:
+    print("\nTesting batch parser splits tickers...")
+    from agents.ratings_agent.agent import RatingsAgent
+
+    agent = RatingsAgent.__new__(RatingsAgent)
+    agent.get_company_sector = lambda ticker: "Healthcare Analyst"
+
+    mock_response = """
+IBM:
+EXECUTIVE SUMMARY: IBM's hybrid cloud pivot gains analyst support.
+RATING RATIONALE: Mainframe modernization wins drove the upgrade.
+RISK FACTORS: Legacy revenue decline remains a headwind.
+INVESTMENT RECOMMENDATION: BUY (High Confidence)
+EXPERT RECOMMENDATION: Tech Analyst
+
+MRNA:
+EXECUTIVE SUMMARY: Moderna pipeline progress offsets vaccine slowdown.
+RATING RATIONALE: Oncology trial data prompted the price target raise.
+RISK FACTORS: Post-pandemic demand normalization.
+INVESTMENT RECOMMENDATION: HOLD (Medium Confidence)
+EXPERT RECOMMENDATION: Healthcare Analyst
+"""
+    parsed = agent.parse_structured_insights(mock_response, ["IBM", "MRNA"])
+    ibm = parsed["IBM"]
+    mrna = parsed["MRNA"]
+
+    if ibm["summary"] == mrna["summary"]:
+        print("✗ Batch parser returned identical summaries for different tickers")
+        return False
+    if "hybrid cloud" not in ibm["summary"].lower():
+        print(f"✗ IBM summary missing expected content: {ibm['summary']!r}")
+        return False
+    if "pipeline" not in mrna["summary"].lower():
+        print(f"✗ MRNA summary missing expected content: {mrna['summary']!r}")
+        return False
+    if "mainframe" not in ibm["rating_rationale"].lower():
+        print(f"✗ IBM rating_rationale missing expected content: {ibm['rating_rationale']!r}")
+        return False
+    if "oncology" not in mrna["rating_rationale"].lower():
+        print(f"✗ MRNA rating_rationale missing expected content: {mrna['rating_rationale']!r}")
+        return False
+    print("✓ Batch parser returns distinct insights per ticker")
+    return True
+
+
 def main() -> int:
     print("=== Ratings Agent Test Suite ===\n")
     tests = [
         ("Imports", test_imports),
         ("Configuration", test_config),
         ("RatingsAgent Import", test_agent_import),
+        ("Batch Parser", test_batch_parser_splits_tickers),
         ("Detection Logic", test_detection_logic),
     ]
     results: list[tuple[str, bool]] = []
