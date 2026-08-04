@@ -252,73 +252,117 @@ class RatingsAgent:
 
     # ----- AI insights (mirrors earnings agent shapes) -----
 
-    def parse_structured_insights(self, response_text: str, ticker: str) -> dict[str, str]:
-        result = {
+    def _blank_insight(self, ticker: str) -> dict[str, str]:
+        return {
             "summary": "",
             "rating_rationale": "",
             "risk_factors": "",
             "investment_recommendation": "HOLD (Medium Confidence)",
             "expert_recommendation": self.get_company_sector(ticker),
         }
-        if not response_text:
-            return result
 
-        lines = response_text.split("\n")
+    def parse_structured_insights(
+        self, response_text: str, tickers: list[str]
+    ) -> dict[str, dict[str, str]]:
+        results = {ticker: self._blank_insight(ticker) for ticker in tickers}
+        if not response_text:
+            return results
+
+        ticker_lookup = {ticker.lower(): ticker for ticker in tickers}
+        current_ticker: str | None = tickers[0] if len(tickers) == 1 else None
         current_section: str | None = None
         current_content: list[str] = []
+        saw_ticker_header = False
 
-        for raw in lines:
+        def flush_section() -> None:
+            nonlocal current_content
+            if current_ticker and current_section and current_content:
+                results[current_ticker][current_section] = " ".join(current_content)
+                current_content = []
+
+        for raw in response_text.splitlines():
             line = raw.strip()
             if not line:
-                if current_section and current_content:
-                    result[current_section] = " ".join(current_content)
-                    current_content = []
+                flush_section()
                 continue
 
-            if "EXECUTIVE SUMMARY" in line.upper():
-                if current_section and current_content:
-                    result[current_section] = " ".join(current_content)
+            upper = line.upper()
+
+            ticker_from_line: str | None = None
+            if upper.startswith("TICKER:"):
+                raw_name = line.split(":", 1)[1].strip().lower()
+                ticker_from_line = ticker_lookup.get(raw_name)
+                if not ticker_from_line and raw_name:
+                    for low_name, canonical in ticker_lookup.items():
+                        if low_name in raw_name or raw_name in low_name:
+                            ticker_from_line = canonical
+                            break
+            else:
+                candidate = line.rstrip(":").strip().lower()
+                if candidate in ticker_lookup and line.rstrip().endswith(":"):
+                    ticker_from_line = ticker_lookup[candidate]
+
+            if ticker_from_line:
+                flush_section()
+                current_section = None
+                current_content = []
+                saw_ticker_header = True
+                current_ticker = ticker_from_line
+                continue
+
+            if "EXECUTIVE SUMMARY" in upper:
+                flush_section()
                 current_section, current_content = "summary", []
                 if ":" in line:
                     content = line.split(":", 1)[1].strip()
                     if content:
                         current_content.append(content)
-            elif "RATING RATIONALE" in line.upper():
-                if current_section and current_content:
-                    result[current_section] = " ".join(current_content)
+            elif "RATING RATIONALE" in upper:
+                flush_section()
                 current_section, current_content = "rating_rationale", []
                 if ":" in line:
                     content = line.split(":", 1)[1].strip()
                     if content:
                         current_content.append(content)
-            elif "RISK FACTORS" in line.upper() or "RISK FACTOR" in line.upper():
-                if current_section and current_content:
-                    result[current_section] = " ".join(current_content)
+            elif "RISK FACTORS" in upper or "RISK FACTOR" in upper:
+                flush_section()
                 current_section, current_content = "risk_factors", []
                 if ":" in line:
                     content = line.split(":", 1)[1].strip()
                     if content:
                         current_content.append(content)
-            elif "INVESTMENT RECOMMENDATION" in line.upper():
-                if ":" in line:
+            elif "INVESTMENT RECOMMENDATION" in upper:
+                flush_section()
+                if current_ticker and ":" in line:
                     value = line.split(":", 1)[1].strip()
                     if value:
-                        result["investment_recommendation"] = value
+                        results[current_ticker]["investment_recommendation"] = value
                 current_section = None
-            elif "EXPERT RECOMMENDATION" in line.upper():
-                if ":" in line:
+            elif "EXPERT RECOMMENDATION" in upper:
+                flush_section()
+                if current_ticker and ":" in line:
                     value = line.split(":", 1)[1].strip()
                     if value:
-                        result["expert_recommendation"] = value
+                        results[current_ticker]["expert_recommendation"] = value
                 current_section = None
-            elif current_section:
+            elif current_section and current_ticker:
                 current_content.append(line)
 
-        if current_section and current_content:
-            result[current_section] = " ".join(current_content)
-        if not result["summary"] and not result["rating_rationale"]:
-            result["summary"] = response_text[:500]
-        return result
+        flush_section()
+
+        if len(tickers) == 1 and not saw_ticker_header:
+            single = results[tickers[0]]
+            if not single["summary"] and not single["rating_rationale"]:
+                single["summary"] = response_text[:500]
+
+        return results
+
+    @staticmethod
+    def _insights_incomplete(insights: dict[str, dict[str, str]]) -> bool:
+        return any(
+            not insight.get("summary") and not insight.get("rating_rationale")
+            for insight in insights.values()
+        )
 
     def _disabled_insights(self) -> dict[str, str]:
         return {
@@ -385,7 +429,9 @@ class RatingsAgent:
                 user_prompt=context,
                 max_tokens=600,
             )
-            return self.parse_structured_insights(content, ticker)
+            return self.parse_structured_insights(content, [ticker]).get(
+                ticker, self._blank_insight(ticker)
+            )
         except Exception as exc:
             return {
                 "summary": f"AI insights unavailable: {exc}",
@@ -435,7 +481,10 @@ class RatingsAgent:
                 user_prompt=context,
                 max_tokens=600 * max(len(changes), 1),
             )
-            return {ticker: self.parse_structured_insights(content, ticker) for ticker in changes}
+            parsed = self.parse_structured_insights(content, list(changes.keys()))
+            if self._insights_incomplete(parsed):
+                return self.generate_individual_insights(changes)
+            return parsed
 
         return self.openai.run_with_fallback(
             primary, lambda: self.generate_individual_insights(changes)

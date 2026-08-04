@@ -60,8 +60,8 @@ For each company, provide:
 6. INVESTMENT RECOMMENDATION: STRONG BUY / BUY / HOLD / SELL / STRONG SELL + confidence
 7. EXPERT RECOMMENDATION: best sector expert type
 
-Format:
-TICKER:
+Format (repeat for each company):
+AAPL:
 EXECUTIVE SUMMARY: ...
 STRATEGIC ANALYSIS: ...
 GUIDANCE OUTLOOK: ...

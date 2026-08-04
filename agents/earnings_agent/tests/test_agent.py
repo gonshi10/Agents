@@ -88,6 +88,98 @@ EXPERT RECOMMENDATION: Tech Analyst
     return True
 
 
+def test_batch_parser_bare_ticker_header() -> bool:
+    print("\nTesting batch parser ignores bare TICKER: header...")
+    from agents.earnings_agent.agent import EarningsAgent
+
+    agent = EarningsAgent.__new__(EarningsAgent)
+    agent.get_company_sector = lambda ticker: "Tech Analyst"
+
+    mock_response = """
+TICKER:
+EXECUTIVE SUMMARY: Should not assign to any ticker.
+STRATEGIC ANALYSIS: Orphan content.
+
+AAPL:
+EXECUTIVE SUMMARY: Apple showed strong iPhone momentum.
+STRATEGIC ANALYSIS: Services growth accelerates.
+
+MSFT:
+EXECUTIVE SUMMARY: Microsoft cloud revenue drives upside.
+STRATEGIC ANALYSIS: Azure gains share versus peers.
+"""
+    parsed = agent.parse_structured_insights(mock_response, ["AAPL", "MSFT"])
+    aapl = parsed["AAPL"]
+    msft = parsed["MSFT"]
+
+    if "orphan" in aapl["summary"].lower() or "orphan" in msft["summary"].lower():
+        print("✗ Bare TICKER: header misassigned orphan content")
+        return False
+    if "iPhone" not in aapl["summary"]:
+        print(f"✗ AAPL summary missing expected content: {aapl['summary']!r}")
+        return False
+    if "cloud" not in msft["summary"].lower():
+        print(f"✗ MSFT summary missing expected content: {msft['summary']!r}")
+        return False
+    print("✓ Bare TICKER: header does not misassign content")
+    return True
+
+
+def test_batch_parser_ticker_symbol_header() -> bool:
+    print("\nTesting batch parser handles TICKER: SYMBOL format...")
+    from agents.earnings_agent.agent import EarningsAgent
+
+    agent = EarningsAgent.__new__(EarningsAgent)
+    agent.get_company_sector = lambda ticker: "Tech Analyst"
+
+    mock_response = """
+TICKER: AAPL
+EXECUTIVE SUMMARY: Apple showed strong iPhone momentum.
+STRATEGIC ANALYSIS: Services growth accelerates.
+
+TICKER: MSFT
+EXECUTIVE SUMMARY: Microsoft cloud revenue drives upside.
+STRATEGIC ANALYSIS: Azure gains share versus peers.
+"""
+    parsed = agent.parse_structured_insights(mock_response, ["AAPL", "MSFT"])
+    aapl = parsed["AAPL"]
+    msft = parsed["MSFT"]
+
+    if aapl["summary"] == msft["summary"]:
+        print("✗ TICKER: SYMBOL format returned identical summaries")
+        return False
+    if "iPhone" not in aapl["summary"]:
+        print(f"✗ AAPL summary missing expected content: {aapl['summary']!r}")
+        return False
+    if "cloud" not in msft["summary"].lower():
+        print(f"✗ MSFT summary missing expected content: {msft['summary']!r}")
+        return False
+    print("✓ TICKER: SYMBOL format splits tickers correctly")
+    return True
+
+
+def test_batch_parser_no_headers_multi_ticker() -> bool:
+    print("\nTesting batch parser returns blanks without headers for multi-ticker...")
+    from agents.earnings_agent.agent import EarningsAgent
+
+    agent = EarningsAgent.__new__(EarningsAgent)
+    agent.get_company_sector = lambda ticker: "Tech Analyst"
+
+    mock_response = """
+EXECUTIVE SUMMARY: Orphan summary with no ticker header.
+STRATEGIC ANALYSIS: Orphan strategic analysis.
+"""
+    parsed = agent.parse_structured_insights(mock_response, ["AAPL", "MSFT"])
+    if parsed["AAPL"]["summary"] or parsed["MSFT"]["summary"]:
+        print("✗ Multi-ticker response without headers should leave summaries blank")
+        return False
+    if not EarningsAgent._insights_incomplete(parsed):
+        print("✗ Incomplete insights check should flag blank multi-ticker parse")
+        return False
+    print("✓ Multi-ticker response without headers returns blank insights")
+    return True
+
+
 def main() -> int:
     print("=== Earnings Agent Test Suite ===\n")
     tests = [
@@ -95,6 +187,9 @@ def main() -> int:
         ("Configuration", test_config),
         ("EarningsAgent Import", test_agent_import),
         ("Batch Parser", test_batch_parser_splits_tickers),
+        ("Bare TICKER Header", test_batch_parser_bare_ticker_header),
+        ("TICKER Symbol Header", test_batch_parser_ticker_symbol_header),
+        ("No Headers Multi-Ticker", test_batch_parser_no_headers_multi_ticker),
     ]
     results: list[tuple[str, bool]] = []
     for name, fn in tests:
